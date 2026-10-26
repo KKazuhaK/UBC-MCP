@@ -14,8 +14,9 @@ The snapshot connector, encryption, credential separation and revocation have
 automated integration coverage. A manual course-capture extension is included.
 It captures visible search results and an open section detail dialog; a separate
 explicit action captures private registrations from View My Courses. It does not
-silently fetch the full catalog or refresh source data. The extension still needs
-an installed-browser export/sync acceptance run before broader release.
+silently fetch the full catalog or refresh source data. An installed-browser
+registration export passed a real local connector/MCP acceptance run; a hosted
+personal connector and course-search export acceptance remain outstanding.
 
 Workday UI fields were inspected in an authenticated browser on 2026-10-26.
 This is evidence of field availability, not evidence of a public Workday API or
@@ -105,6 +106,16 @@ remain in historical backups; manage backup retention separately.
 ```sh
 npm run build:extension
 ```
+
+For a private local acceptance run using an exported registration file:
+
+```sh
+node scripts/private-check.mjs /absolute/path/to/private-registrations.json
+```
+
+This starts a temporary loopback connector, checks personal MCP queries and
+revocation, prints aggregate results, then removes the temporary encrypted store.
+It does not upload the input file to the public Internet or delete the input file.
 
 Load the `extension/` folder as an unpacked Chrome extension. It requests only
 active-tab scripting and downloads, not cookies, persistent host access or passwords.
