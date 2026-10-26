@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "ubc-public": {
+      "type": "stdio",
+      "owner": "admin",
+      "visibility": "public",
+      "idleTimeoutMs": 300000,
+      "command": "/opt/mcp/bin/node24",
+      "args": ["/opt/mcp/ubc/dist/cli.js"],
+      "env": {"UBC_PROFILE": "public"}
+    },
+    "ubc-personal": {
+      "type": "stdio",
+      "owner": "admin",
+      "visibility": "private",
+      "idleTimeoutMs": 300000,
+      "command": "/opt/mcp/bin/node24",
+      "args": ["/opt/mcp/ubc/dist/cli.js"],
+      "env": {"UBC_PROFILE": "personal", "UBC_CONNECTOR_URL": "http://ubc-connector:8792"},
+      "credentialTemplate": [
+        {"target":"env","name":"UBC_CONNECTOR_TOKEN","label":"Your personal UBC connector READ token"}
+      ]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "UBC Course Capture",
+  "version": "0.1.0",
+  "description": "Export visible UBC Workday course sections for a personal course-planning connection.",
+  "permissions": ["activeTab", "scripting", "downloads"],
+  "action": {"default_popup": "popup.html"}
+}

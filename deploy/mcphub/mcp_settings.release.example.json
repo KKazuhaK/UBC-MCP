@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "ubc-public": {
+      "type": "stdio",
+      "owner": "admin",
+      "visibility": "private",
+      "idleTimeoutMs": 300000,
+      "command": "npx",
+      "args": [
+        "--yes",
+        "--package=https://github.com/KKazuhaK/UBC-MCP/releases/download/v0.1.0-alpha.1/ubc-mcp-0.1.0-alpha.1.tgz",
+        "--package=node@24.21.0",
+        "--",
+        "ubc-mcp"
+      ],
+      "env": {"UBC_PROFILE": "public"}
+    }
+  }
+}

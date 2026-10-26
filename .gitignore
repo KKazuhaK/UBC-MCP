@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.data/
+.env
+*.sqlite*
+*.log
+playwright-profile/
+private/
+extension/popup.js
+*.tgz
+*.zip
