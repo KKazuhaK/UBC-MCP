@@ -214,3 +214,7 @@ npm run build:extension
 
 The live suite makes bounded public read requests; the default suite is offline.
 No test loads personal Workday cookies or sends a registration request.
+
+### Connector Docker deployment
+
+See [the container deployment guide](deploy/selfhost/README.md) for automated multi-architecture images, controlled upgrades, persistent data migration and rollback. This deploys the connector independently of MCPHub.

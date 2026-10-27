@@ -5,3 +5,8 @@ node_modules
 private
 playwright-profile
 *.sqlite*
+backup
+backups
+artifacts
+*.tgz
+*.zip

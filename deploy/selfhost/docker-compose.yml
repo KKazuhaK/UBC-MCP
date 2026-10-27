@@ -1,0 +1,35 @@
+services:
+  ubc-connector:
+    image: ${UBC_CONNECTOR_IMAGE:-ghcr.io/kkazuhak/ubc-connector:beta}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    user: "10792:10792"
+    environment:
+      UBC_DATA_DIR: ${UBC_DATA_DIR:?Set the actual existing container data directory}
+      UBC_PUBLIC_ORIGIN: ${UBC_PUBLIC_ORIGIN:?Set the existing HTTPS page origin}
+      UBC_CONNECTOR_HOST: 0.0.0.0
+      UBC_CONNECTOR_PORT: "8792"
+    ports: ["127.0.0.1:8792:8792"]
+    volumes:
+      - type: bind
+        source: ${UBC_DATA_PATH:?Set the existing host data directory}
+        target: /data
+        bind:
+          create_host_path: false
+    networks: [hub]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 30s
+    mem_limit: 256m
+    cpus: 1
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+networks:
+  hub:
+    external: true
+    name: ${UBC_HUB_NETWORK:-mcphub_default}

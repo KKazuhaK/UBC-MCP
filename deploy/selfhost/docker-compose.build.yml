@@ -1,0 +1,8 @@
+# Local build override; registry deployment does not need the source checkout.
+services:
+  ubc-connector:
+    image: ubc-connector:local
+    pull_policy: build
+    build:
+      context: ../..
+      dockerfile: Dockerfile.connector

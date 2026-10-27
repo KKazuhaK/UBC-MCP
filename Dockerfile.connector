@@ -1,0 +1,29 @@
+FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci --ignore-scripts
+COPY src ./src
+RUN npm run build && npm prune --omit=dev --ignore-scripts
+
+FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+ARG BUILD_VERSION=dev
+ARG BUILD_COMMIT=unknown
+ARG BUILD_TIME=unknown
+LABEL org.opencontainers.image.title="ubc-connector" \
+      org.opencontainers.image.source="https://github.com/KKazuhaK/UBC-MCP" \
+      org.opencontainers.image.version=$BUILD_VERSION \
+      org.opencontainers.image.revision=$BUILD_COMMIT \
+      org.opencontainers.image.created=$BUILD_TIME \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+RUN groupadd --gid 10792 ubc && useradd --uid 10792 --gid 10792 --no-create-home --shell /usr/sbin/nologin ubc && mkdir /data && chown 10792:10792 /data
+ENV NODE_ENV=production UBC_DATA_DIR=/data/connector UBC_CONNECTOR_HOST=0.0.0.0 UBC_CONNECTOR_PORT=8792
+WORKDIR /app
+COPY --from=build --chown=10792:10792 /app/package.json ./
+COPY --from=build --chown=10792:10792 /app/dist ./dist
+COPY --from=build --chown=10792:10792 /app/node_modules ./node_modules
+COPY LICENSE ./LICENSE
+USER 10792:10792
+EXPOSE 8792
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:8792/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+ENTRYPOINT ["node", "dist/connector/cli.js"]
+CMD ["serve"]
