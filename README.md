@@ -210,17 +210,114 @@ See [the container deployment guide](deploy/selfhost/README.md) for automated mu
 ## Optional: MCPHub integration
 
 Everything here is optional and disabled by default. The MCP server and the
-connector core never depend on it. The integration is one adapter module
-(`src/connector/adapters/mcphub.ts`) selected by configuration:
+connector core never depend on it. The integration is one adapter module per
+mode (`src/connector/adapters/mcphub-oauth.ts`, and the deprecated cookie-based
+`mcphub.ts`) selected by configuration. The variables below apply to the
+cookie-based `mcphub` adapter; `mcphub-oauth` has its own set, listed in the next section:
 
 | Variable | Meaning |
 | --- | --- |
-| `UBC_PLATFORM_ADAPTER` | `mcphub` enables it; `none` disables it explicitly (wins over the legacy variables). Unset with none of the variables below set: off, and `/ubc/*` return 404. |
+| `UBC_PLATFORM_ADAPTER` | `mcphub-oauth` (recommended, see [Connecting to MCPHub](#connecting-to-mcphub-oauth)) or `mcphub` (**deprecated**, forwards the user's Hub session cookie); `none` disables explicitly (wins over the legacy variables). Unset with none of the variables below set: off, and `/ubc/*` return 404. |
 | `UBC_PUBLIC_ORIGIN` | Required with the adapter: HTTPS origin on which users reach the connector's `/ubc/` page. |
 | `UBC_PLATFORM_URL` | Hub base URL for API calls. Defaults to `UBC_PUBLIC_ORIGIN`. `UBC_HUB_URL` is a deprecated alias. |
 | `UBC_PLATFORM_SERVER_NAME` | Name of the Hub server entry that holds the user's credential. Default `ubc-personal`. |
 
 Server names must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`.
+
+### Connecting to MCPHub (OAuth)
+
+`UBC_PLATFORM_ADAPTER=mcphub-oauth` connects a user's snapshots to MCPHub with
+standard OAuth 2.1 (authorization code + PKCE S256) instead of forwarding the
+user's MCPHub session cookie. The connector never reads, forwards or relies on
+MCPHub cookies, requests only the scope `credentials:write:<server name>`, uses
+the access token once and discards it. Default remains: no adapter.
+
+**MCPHub admin steps**
+
+1. Register the connector as an OAuth client in MCPHub as a **public client (no
+   secret)**: PKCE S256 is what protects the flow. Redirect URI:
+   `${UBC_PUBLIC_ORIGIN}/ubc/oauth/callback`
+   (for example `https://hub.example.com/ubc/oauth/callback`). Do not register a
+   confidential client until you run an MCPHub that contains the fix
+   "fix: let confidential clients complete the authorization code flow"; older
+   versions cannot complete `/oauth/authorize` for confidential clients.
+2. There is no dashboard control for `credentialWriteClients`; set it with the
+   administrator API. The server update replaces the whole server config, so read it,
+   add the field, and send it back. The example uses an all-access system bearer key
+   in `Authorization`; with a dashboard session token, send it as `x-auth-token`
+   instead. The `jq` step adds the client to any ids already listed:
+
+   ```sh
+   HUB=https://hub.example.com; NAME=ubc-personal
+   curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "$HUB/api/servers/$NAME" \
+     | jq '{config: (.data.config // .data | .credentialWriteClients = (((.credentialWriteClients // []) + ["ubc-connector"]) | unique))}' \
+     | curl -s -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+         -d @- "$HUB/api/servers/$NAME"
+   ```
+
+   Check the response of the first call for the exact shape on your MCPHub version;
+   the PUT body is `{"config": { ...full server config..., "credentialWriteClients": ["<client id>"] }}`.
+   Before sending it back, make sure the first call returned real values rather than
+   masked placeholders for any secret headers or environment variables; writing a
+   masked value back would replace the real one. If they are masked, add the field
+   in the server's entry in `mcp_settings.json` instead (JSON mode).
+3. The `ubc-personal` server must be visible (shared or public) to the users who
+   connect, and must define the `env.UBC_CONNECTOR_TOKEN` credential. The scoped
+   token never acts as an administrator, so it cannot see a private server.
+4. If `UBC_PLATFORM_URL` is an internal address (for example `http://mcphub:3000`),
+   configure MCPHub's public base URL (`install.baseUrl` in the system config, or the
+   `INSTALL_BASE_URL` environment variable). MCPHub builds the endpoints in its
+   discovery document from it; without it the advertised `authorization_endpoint`
+   would be the internal address, which browsers cannot reach. The connector logs
+   a warning on first use when the advertised authorization host differs from
+   `UBC_PLATFORM_URL` and is not https.
+
+Limitations: MCPHub's custom bearer header name (`routing.bearerAuthHeaderName`) and
+base paths are not supported by this adapter yet; it sends `Authorization: Bearer` and
+uses `/api/credentials/<server>` and `/oauth/*` from the discovery document as served.
+
+**Connector configuration** (validated at startup; a missing or invalid value stops the process with a clear message)
+
+| Variable | Meaning |
+| --- | --- |
+| `UBC_PLATFORM_ADAPTER` | `mcphub-oauth` |
+| `UBC_PUBLIC_ORIGIN` | Required. Origin users reach `/ubc/` on: `https://...` (plain `http://` only for `localhost`, `127.0.0.1`, `[::1]`). No path. |
+| `UBC_PLATFORM_URL` | Required. MCPHub base URL. Used for `/.well-known/oauth-authorization-server`, `/api/credentials/<server>`, and (re-based onto this host) the token and userinfo endpoints. Use `https`; plain `http` only on a trusted private network (a warning is logged). |
+| `UBC_OAUTH_CLIENT_ID` | Required. The OAuth client id registered in MCPHub. |
+| `UBC_OAUTH_CLIENT_SECRET` | Optional; leave unset (public client with PKCE). Only for MCPHub versions that support confidential clients in the authorization code flow ("fix: let confidential clients complete the authorization code flow"). If set, sent as `client_secret_post`, or HTTP Basic when MCPHub advertises only `client_secret_basic`. |
+| `UBC_PLATFORM_SERVER_NAME` | MCPHub server entry holding the credential. Default `ubc-personal`; same validation as the cookie adapter. |
+| `UBC_SESSION_SECRET` | Required, at least 32 bytes (for example `openssl rand -base64 48`). Signs the connector's own cookies. Changing it signs everyone out of the connector page, nothing else. |
+
+**Flow**
+
+1. On `/ubc/` the user clicks **Connect with MCPHub**. `/ubc/oauth/start` creates
+   a random `state` and PKCE verifier, stores them in a short-lived (10 minute)
+   signed `HttpOnly` `SameSite=Lax` cookie (`Secure` unless the origin is
+   loopback http) and redirects to MCPHub's authorization endpoint.
+2. MCPHub redirects to `/ubc/oauth/callback`. The connector checks the signed
+   cookie and `state` (single use), exchanges the code with the PKCE verifier,
+   and calls `userinfo` to learn the MCPHub username (`sub`).
+3. It finds or creates the connector account for that username (the same account
+   model as the cookie adapter, so existing users keep their snapshots), then
+   `PUT`s that account's READ token to `/api/credentials/<server>` with the access
+   token as Bearer. The access token is then dropped.
+4. The connector sets its own signed session cookie (account id, **15 minutes**: it is only needed to finish pairing; after that, connect again from the page) and
+   shows the page with a pairing code for the extension. The extension's
+   "Connect with MCPHub" works as before.
+5. **Disconnect** requires a fresh authorization: the page starts the flow with
+   `intent=disconnect`; after MCPHub confirms the same user, the callback deletes
+   the credential on MCPHub and revokes the connector binding and snapshots.
+   Connector revocation always wins if the MCPHub delete fails. **Forget this
+   browser** only clears the connector session cookie.
+
+All state-changing calls from the page need the connector session plus a CSRF
+token (synchronizer token, sent as `X-CSRF-Token`) and a same-origin request.
+MCPHub error bodies are never shown or logged (on an `error=` redirect only the standard error code such as `invalid_scope`, `invalid_client` or `access_denied` is logged, so operators can tell misconfiguration from a user declining); users see a short message, and
+tokens, codes, verifiers and credential values are never logged.
+
+Proxy note: the connector only looks at its own `ubc_session` and `ubc_oauth`
+cookies. If you want to be strict, forward only those to `/ubc/` in the reverse
+proxy instead of the whole `Cookie` header.
 
 ### Upgrading
 
@@ -233,6 +330,19 @@ Server names must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`.
   `UBC_PLATFORM_ADAPTER=mcphub` explicitly; automatic enabling will be removed later.
   A stray `UBC_HUB_URL` without `UBC_PUBLIC_ORIGIN` is ignored with a warning, as before;
   with neither set the connector runs without an adapter.
+- **Switching from `mcphub` (cookie) to `mcphub-oauth`:** register the OAuth client
+  and add its id to `credentialWriteClients` on MCPHub first (see above), then
+  change `UBC_PLATFORM_ADAPTER=mcphub-oauth` and add `UBC_PLATFORM_URL`,
+  `UBC_PUBLIC_ORIGIN` (unchanged), `UBC_OAUTH_CLIENT_ID`, `UBC_SESSION_SECRET`
+  (and optionally `UBC_OAUTH_CLIENT_SECRET`) and restart. The database is
+  untouched: accounts are keyed by the MCPHub username in both modes, so existing
+  users keep their binding, snapshots and extension credentials. Users click
+  **Connect with MCPHub** once on `/ubc/` to authorize; the READ credential stored
+  in MCPHub is rewritten with the same token. The cookie routes
+  (`/ubc/api/connect`, `/ubc/api/disconnect`) do not exist in the new mode. Roll
+  back by switching the variable back.
+- **Deprecation:** the cookie-based `mcphub` adapter logs a warning at startup and
+  will be removed in a future release. Automatic enabling from `UBC_PUBLIC_ORIGIN` alone is also deprecated.
 - **Version:** the version now comes from `package.json` (`--version`, MCP server info,
   `/healthz`, User-Agent). `/healthz` returns `{"ok":true,"version":"..."}`.
 - **Extension first run:** no server address is built in; the field starts empty and
@@ -274,7 +384,7 @@ Only `/ubc/` needs to be proxied to the connector on that Hub origin, alongside
 `/v1/snapshots`; no Hub code, identity-provider setup or `/api/` route changes are
 needed. The connector verifies the current Hub session and existing access to the configured
 Hub server before issuing the upload-only credential. This is session reuse rather
-than a new OAuth server. An outdated connector is reported before authorization.
+than a new OAuth server (this is the deprecated `mcphub` adapter; prefer `mcphub-oauth`). An outdated connector is reported before authorization.
 
 Credentials remain bound to their original origin when switching servers. Legacy
 0.2.x connections remain bound to their original deployment; they are never
