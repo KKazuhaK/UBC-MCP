@@ -1,6 +1,6 @@
 services:
   ubc-connector:
-    image: ${UBC_CONNECTOR_IMAGE:-ghcr.io/kkazuhak/ubc-connector:beta}
+    image: ${UBC_CONNECTOR_IMAGE:-ghcr.io/kkazuhak/ubc-connector:edge}
     pull_policy: always
     restart: unless-stopped
     init: true

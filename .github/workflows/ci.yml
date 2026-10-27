@@ -21,3 +21,6 @@ jobs:
       - run: npx --yes web-ext@10.8.0 lint --source-dir .data/firefox-extension --warnings-as-errors
       - run: npm pack --dry-run
       - run: docker build -t ubc-mcp:check .
+
+      - run: docker compose --env-file deploy/selfhost/env.example -f deploy/selfhost/docker-compose.yml config -q
+      - run: docker compose --env-file deploy/selfhost/env.example -f deploy/selfhost/docker-compose.yml -f deploy/selfhost/docker-compose.build.yml config -q

@@ -18,12 +18,14 @@ image with synthetic users, and publishes a multi-architecture image to
 | --- | --- |
 | `edge` | Default-branch build; use a digest when deploying it |
 | `0.1.0-alpha.N` | An exact release |
-| `beta` | Most recent release, including prereleases |
+| `beta` | Most recent release, including prereleases; created by the next release tag |
 | `latest` | Stable releases only; absent until the first stable release |
 
 Publishing an image does not restart a running server. Like the Canvas deployment,
 update deliberately with `docker compose pull` followed by `docker compose up -d`.
 There is no unattended updater. Keep the previous digest for rollback.
+The env example pins an already available image. Omitting the image variable
+selects `edge`; `beta` is not assumed to exist before a release runs this workflow.
 
 ## Fresh installation
 
