@@ -74,8 +74,24 @@ The unmodified alpha.1 Hub personal stdio entry became Online with eleven tools;
 a real get_data_status call through the Hub returned personal.connected=true
 and an empty periods array. No real snapshot was uploaded.
 
-Installed-extension pairing/upload/revocation still await loading the extension
-in the same authenticated Chrome profile. Extension 0.2.1 adds a validated JSON
-file import preview, allowing synthetic-data acceptance without scraping or
-uploading real Workday selections. Existing 35 tests pass with import-preview and
-explicit upload coverage. No connector upgrade is needed for this extension patch.
+Installed extension 0.2.1 was paired in the Work Chrome profile using a one-use
+code from the already signed-in Lian. profile. This confirms the extension needs
+only its own scoped upload credential, not Hub or Workday cookies. A synthetic
+ZZTEST 999 section in period 2026W-GUI-TEST was imported, previewed and explicitly
+uploaded in the real popup. The popup reported a successful one-period sync.
+The connection page listed the scope, and a real search_sections call through
+Hub returned the section with the exact original capturedAt/observedAt and a
+correct stale indicator. The Hub form supplied an invalid zero latestMinute by
+default; explicitly setting 1440 allowed the valid query. Hub was not modified.
+
+Disconnect was confirmed in the frontmost Chrome window. The page returned to
+not-connected with no snapshots. Repeating the Hub query refused access due to
+missing personal credentials. Re-importing the same synthetic file in the
+extension and retrying upload returned HTTP 401. Forget local connection then
+removed the extension credential. No real schedule was uploaded. Cross-user Hub
+acceptance and live course-search export remain unverified; private visibility
+has not been expanded.
+
+Extension 0.2.1 adds validated JSON file import preview for synthetic acceptance
+and existing exports. All 35 tests pass with import-preview/explicit-upload
+coverage. No connector upgrade is needed for this extension patch.
