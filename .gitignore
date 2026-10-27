@@ -12,3 +12,6 @@ extension/popup.js
 
 extension/LICENSE.txt
 extension/THIRD_PARTY_NOTICES.txt
+
+extension/background.js
+extension/hub-link.js

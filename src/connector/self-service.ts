@@ -12,10 +12,11 @@ export function selfService(store:Store,config:SelfServiceConfig) {
     const data=await r.json() as any;if(data?.success===false)throw new Error('Hub denied request');return data;
   }
   return async(req:IncomingMessage,res:ServerResponse,send:(status:number,value:unknown)=>void)=>{
+    if(req.url==='/ubc/capabilities'&&req.method==='GET'){send(200,{extensionAuthorization:1});return;}
     if(req.url==='/ubc/'||req.url==='/ubc/app.js') {
       if(req.method!=='GET'){send(405,{error:'METHOD_NOT_ALLOWED'});return;}
       res.writeHead(200,{'Content-Type':req.url.endsWith('.js')?'text/javascript; charset=utf-8':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});
-      res.end(req.url.endsWith('.js')?script:page);return;
+      res.end(req.url.endsWith('.js')?script:page.replaceAll('https://mcp.kazuhahub.com',origin));return;
     }
     if(!['/ubc/api/status','/ubc/api/connect','/ubc/api/pair','/ubc/api/disconnect','/ubc/api/claim'].includes(req.url??'')){send(404,{error:'NOT_FOUND'});return;}
     const claim=req.url==='/ubc/api/claim';
@@ -24,7 +25,7 @@ export function selfService(store:Store,config:SelfServiceConfig) {
     if(claim) {
       // One-use random code authorizes only an upload credential, never a Hub session.
       if(req.headers.cookie||(req.headers.origin&&!isExtensionOrigin(req.headers.origin))){send(403,{error:'EXTENSION_REQUIRED'});return;}
-      res.setHeader('Access-Control-Allow-Origin',req.headers.origin!);res.setHeader('Vary','Origin');
+      if(req.headers.origin){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');}
       const chunks:Buffer[]=[];let n=0;
       for await(const c of req){n+=c.length;if(n>1024){send(413,{error:'TOO_LARGE'});return;}chunks.push(c);}
       try{const result=store.claim(JSON.parse(Buffer.concat(chunks).toString()).code);send(result?200:401,result??{error:'PAIRING_EXPIRED_OR_USED'});}catch{send(400,{error:'INVALID_REQUEST'});}return;
@@ -45,7 +46,7 @@ export function selfService(store:Store,config:SelfServiceConfig) {
         // Connector revocation always wins, even if Hub credential cleanup fails.
         try{await api('/api/credentials/ubc-personal',cookie,'DELETE');send(200,{connected:false});}catch{send(200,{connected:false,warning:'Connection revoked; remove the saved Hub credential in Credentials.'});}
       }else {
-        const a=store.account(username);send(200,{connected:!!a,scopes:a?store.get(a.id).map(s=>({campus:s.campus,period:s.academicPeriod.id,kind:s.kind,capturedAt:s.capturedAt,sections:s.sections.length})):[]});
+        const a=store.account(username);send(200,{username,connected:!!a,scopes:a?store.get(a.id).map(s=>({campus:s.campus,period:s.academicPeriod.id,kind:s.kind,capturedAt:s.capturedAt,sections:s.sections.length})):[]});
       }
     }catch{send(403,{error:'LOGIN_OR_UBC_ACCESS_REQUIRED',message:'Sign in to Hub and ensure ubc-personal is available to your account. Retry Connect if credential saving failed.'});}
   };

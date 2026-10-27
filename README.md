@@ -218,3 +218,24 @@ No test loads personal Workday cookies or sends a registration request.
 ### Connector Docker deployment
 
 See [the container deployment guide](deploy/selfhost/README.md) for automated multi-architecture images, controlled upgrades, persistent data migration and rollback. This deploys the connector independently of MCPHub.
+
+### Connect the extension through your MCPHub
+
+Extension 0.3.0 and connector alpha.5 add **Connect with MCPHub**. New installations
+start with an empty server field. Enter your own MCPHub HTTPS origin, allow access
+to that origin, sign in there, and approve the extension connection. No token or
+pairing code needs to be copied. The connection persists in local extension
+storage across normal browser restarts. Firefox still requires a signed install
+for the extension itself to survive a restart.
+
+Only `/ubc/` needs to be proxied to the connector on that Hub origin, alongside
+`/v1/snapshots`; no Hub code, identity-provider setup or `/api/` route changes are
+needed. The connector verifies the current Hub session and existing `ubc-personal`
+access before issuing the upload-only credential. This is session reuse rather
+than a new OAuth server. An outdated connector is reported before authorization.
+
+Credentials remain bound to their original origin when switching servers. Legacy
+0.2.x connections remain bound to their original deployment; they are never
+silently reassigned to a newly entered origin. Manual code pairing remains an
+advanced fallback. Snapshot capture/upload is still explicitly initiated; one-click
+Workday navigation and automatic synchronization are separate pending work.

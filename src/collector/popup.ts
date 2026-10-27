@@ -1,10 +1,11 @@
 import {parseSnapshot,type Snapshot} from '../model.js';
+import {DEFAULT_HUB,hubOrigin,storedConnection} from './connection.js';
 import {extractWorkdayDom} from './dom.js';
 import {normalizeCapture} from './normalize.js';
 import {extractRegistrationDom,normalizeRegistrations} from './registrations.js';
 declare const browser:typeof chrome;
 const extensionApi=typeof browser!=='undefined'?browser:chrome;
-const origin='https://mcp.kazuhahub.com';
+let origin=DEFAULT_HUB;
 const el=(id:string)=>document.getElementById(id)!;
 const status=el('status');
 let pending:Snapshot[]=[],busy=false,paired=false;
@@ -31,8 +32,9 @@ async function action(id:string,label:string,work:()=>Promise<void>) {
   finally{busy=false;document.body.setAttribute('aria-busy','false');if(button.tagName==='BUTTON'){button.textContent=original;button.removeAttribute('aria-busy');}controls();}
 }
 async function showConnection() {
-  const x=await extensionApi.storage.local.get('ubcUploadToken');paired=!!x.ubcUploadToken;
-  el('connection').textContent=paired?'Paired · Uploads go to your connected Hub account.':'Not paired · Generate a code in your Hub account.';
+  const x=await extensionApi.storage.local.get(['ubcUploadToken','ubcConnection','ubcHubOrigin','ubcAuthorization']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;origin=connection?.origin??DEFAULT_HUB;
+  el('connection').textContent=connection?`Connected · ${connection.origin}`:'Not connected · Sign in through your MCPHub.';
+  return x;
 }
 // Credentials stay in trusted extension-local storage, never page or sync storage.
 busy=true;controls();
@@ -42,10 +44,10 @@ async function initialize(){
     const setup=async()=>{
       // Firefox has no setAccessLevel. This extension declares no content scripts.
       if(typeof extensionApi.storage.local.setAccessLevel==='function')await extensionApi.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
-      await showConnection();
+      const data=await showConnection();(el('hub-origin') as HTMLInputElement).value=data.ubcHubOrigin??(paired?origin:'');
     };
     await Promise.race([setup(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Could not read the local connection. Reopen the extension or reload it, then try again.')),8000);})]);
-    feedback(paired?'Ready. Preview data to sync.':'Ready. Pair your account to get started.');
+    feedback(paired?'Ready. Preview data to sync.':'Ready. Enter your MCPHub address to connect.');
   }catch(e){el('connection').textContent='Local connection could not be checked.';feedback(errorMessage(e),'error');}
   finally{if(timer)clearTimeout(timer);busy=false;controls();}
 }
@@ -53,6 +55,8 @@ void initialize();
 el('pair').onclick=()=>action('pair','Pairing with your account…',async()=>{
   const input=el('pair-code') as HTMLInputElement,code=input.value.trim();
   if(!/^[\w-]{43}$/.test(code))throw new Error('Paste a valid pairing code from the connection page.');
+  origin=hubOrigin((el('hub-origin') as HTMLInputElement).value);
+  if(extensionApi.permissions?.request&&!await extensionApi.permissions.request({origins:[origin+'/*']}))throw new Error('Site access is needed to connect to this MCPHub.');
   input.value='';
   const r=await fetch(origin+'/ubc/api/claim',{method:'POST',credentials:'omit',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),signal:AbortSignal.timeout(15_000)});
   if(!r.ok){
@@ -63,10 +67,10 @@ el('pair').onclick=()=>action('pair','Pairing with your account…',async()=>{
     throw new Error(`Pairing service returned HTTP ${r.status}. Please retry or contact the service operator.`);
   }
   const x=await r.json();if(!/^[\w-]{43}$/.test(x.uploadToken))throw new Error('Invalid pairing response. Please try a new pairing code.');
-  await extensionApi.storage.local.set({ubcUploadToken:x.uploadToken});await showConnection();feedback('Account paired. Next, preview your Workday data.','success');
+  await extensionApi.storage.local.set({ubcConnection:{origin,uploadToken:x.uploadToken}});await showConnection();feedback('Account paired. Next, preview your Workday data.','success');
 });
 el('forget').onclick=()=>action('forget','Removing local connection…',async()=>{
-  await extensionApi.storage.local.remove('ubcUploadToken');pending=[];el('preview').textContent='';await showConnection();
+  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization']);pending=[];el('preview').textContent='';await showConnection();
   feedback('Local connection removed. To revoke server access and delete snapshots, use the connection page.','success');
 });
 async function capture(kind:'sections'|'registrations'):Promise<Snapshot[]> {
@@ -97,14 +101,15 @@ el('snapshot-file').onchange=()=>action('snapshot-file','Reading and validating 
   }finally{input.value='';}
 });
 el('upload').onclick=()=>action('upload','Preparing upload…',async()=>{
-  const {ubcUploadToken}=await extensionApi.storage.local.get('ubcUploadToken');
-  if(!ubcUploadToken)throw new Error('Pair the extension first.');if(!pending.length)throw new Error('Preview data first.');
+  const connection=storedConnection(await extensionApi.storage.local.get(['ubcUploadToken','ubcConnection']));
+  if(!connection)throw new Error('Pair the extension first.');if(!pending.length)throw new Error('Preview data first.');
+  const {uploadToken:ubcUploadToken,origin:uploadOrigin}=connection;
   let completed=0;const total=pending.length;
   while(pending.length){
     feedback(`Uploading period ${completed+1} of ${total}… Keep this popup open until it finishes.`,'loading');
     el('upload').textContent=`Uploading ${completed+1} of ${total}…`;
-    const r=await fetch(origin+'/v1/snapshots',{method:'POST',credentials:'omit',redirect:'error',headers:{Authorization:`Bearer ${ubcUploadToken}`,'Content-Type':'application/json'},body:JSON.stringify(pending[0]),signal:AbortSignal.timeout(20_000)});
-    if(!r.ok){await r.body?.cancel();if(r.status===401){await extensionApi.storage.local.remove('ubcUploadToken');await showConnection();throw new Error('Your connection was revoked. Pair again using a new code.');}throw new Error(`Upload stopped after ${completed} of ${total} periods (HTTP ${r.status}). Refresh Workday and preview again.`);}
+    const r=await fetch(uploadOrigin+'/v1/snapshots',{method:'POST',credentials:'omit',redirect:'error',headers:{Authorization:`Bearer ${ubcUploadToken}`,'Content-Type':'application/json'},body:JSON.stringify(pending[0]),signal:AbortSignal.timeout(20_000)});
+    if(!r.ok){await r.body?.cancel();if(r.status===401){await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection']);await showConnection();throw new Error('Your connection was revoked. Pair again using a new code.');}throw new Error(`Upload stopped after ${completed} of ${total} periods (HTTP ${r.status}). Refresh Workday and preview again.`);}
     await r.body?.cancel();pending.shift();completed++;
   }
   feedback(`Synced ${completed} period(s). You can close Chrome. Sync again when your Workday data changes.`,'success');
@@ -117,3 +122,20 @@ for(const [id,kind]of [['capture','sections'],['registrations','registrations']]
     finally{URL.revokeObjectURL(url);}
     feedback('Export saved. Keep registration files private. You can import this file later to preview and sync it.','success');
   });
+
+el('hub-login').onclick=()=>action('hub-login','Opening your MCPHub…',async()=>{
+  const selected=hubOrigin((el('hub-origin') as HTMLInputElement).value);
+  if(!await extensionApi.permissions.request({origins:[selected+'/*']}))throw new Error('Allow access to your selected MCPHub to continue.');
+  const response=await extensionApi.runtime.sendMessage({type:'ubc.authorize.start',origin:selected});
+  if(!response?.ok)throw new Error(response?.error??'Could not open your MCPHub.');
+  feedback('Continue in the MCPHub tab. This popup can be closed.');
+});
+if(extensionApi.storage.onChanged)extensionApi.storage.onChanged.addListener((changes,area)=>{
+  if(area!=='local'||!('ubcAuthorization'in changes||'ubcConnection'in changes))return;
+  void showConnection().then(data=>{
+    const a=data.ubcAuthorization;
+    if(a?.status==='connected')feedback('Connected through MCPHub. Your connection is saved for future syncs.','success');
+    else if(a?.status==='error')feedback(a.message??'Connection failed. Try again.','error');
+    controls();
+  }).catch(()=>feedback('Could not read your connection. Reopen the popup.','error'));
+});

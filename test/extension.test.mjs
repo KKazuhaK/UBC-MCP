@@ -7,21 +7,22 @@ import {parseHTML} from 'linkedom';
 import {snapshot,section} from './fixtures.mjs';
 test('extension pairing keeps only upload credential in trusted local storage and requires explicit preview',async()=>{
  const {document}=parseHTML(readFileSync('extension/popup.html','utf8')),state={},requests=[];let access;
- const chrome={storage:{local:{setAccessLevel:async x=>{access=x.accessLevel;},get:async()=>({...state}),set:async x=>Object.assign(state,x),remove:async key=>{delete state[key];}}}};
+ const chrome={storage:{local:{setAccessLevel:async x=>{access=x.accessLevel;},get:async()=>({...state}),set:async x=>Object.assign(state,x),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete state[key];}}}};
  const fetch=async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>({uploadToken:'b'.repeat(43)})};};
  const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120',legalComments:'none'});
  runInNewContext(bundle.outputFiles[0].text,{document,chrome,fetch,AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
  assert.equal(access,'TRUSTED_CONTEXTS');assert.equal(document.getElementById('upload').disabled,true);
- document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
+ document.getElementById('hub-origin').value='https://mcp.kazuhahub.com';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
  assert.equal(requests[0].url,'https://mcp.kazuhahub.com/ubc/api/claim');assert.equal(requests[0].options.credentials,'omit');assert.equal(requests[0].options.redirect,'error');assert.equal(document.getElementById('pair-code').value,'');
- assert.deepEqual(Object.keys(state),['ubcUploadToken']);assert.equal(state.ubcUploadToken,'b'.repeat(43));
+ assert.deepEqual(Object.keys(state),['ubcConnection']);assert.equal(state.ubcConnection.uploadToken,'b'.repeat(43));assert.equal(state.ubcConnection.origin,'https://mcp.kazuhahub.com');
  await document.getElementById('upload').onclick();assert.equal(requests.length,1);assert.match(document.getElementById('status').textContent,/Preview data first/);
  const timestamp=new Date().toISOString(),data=snapshot({capturedAt:timestamp,sections:[section({observedAt:timestamp})]});
  const input=document.getElementById('snapshot-file');input.files=[{size:100,text:async()=>JSON.stringify(data)}];
  await input.onchange();assert.equal(document.getElementById('upload').disabled,false);assert.equal(requests.length,1);
+ document.getElementById('hub-origin').value='https://different.example.com';
  await document.getElementById('upload').onclick();assert.equal(requests.length,2);assert.equal(requests[1].url,'https://mcp.kazuhahub.com/v1/snapshots');assert.equal(requests[1].options.headers.Authorization,'Bearer '+'b'.repeat(43));assert.equal(JSON.parse(requests[1].options.body).capturedAt,timestamp);
  input.files=[{size:100,text:async()=>'{"not":"snapshot"}'}];await input.onchange();assert.equal(document.getElementById('upload').disabled,true);
- await document.getElementById('forget').onclick();assert.equal(state.ubcUploadToken,undefined);assert.equal(document.getElementById('upload').disabled,true);
+ await document.getElementById('forget').onclick();assert.equal(state.ubcConnection,undefined);assert.equal(document.getElementById('upload').disabled,true);
 });
 
 test('extension shows pairing progress immediately, blocks duplicate actions and recovers after failure',async()=>{
@@ -30,7 +31,7 @@ test('extension shows pairing progress immediately, blocks duplicate actions and
  const fetch=()=>{requests++;return new Promise(r=>finish=r);};
  const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120',legalComments:'none'});
  runInNewContext(bundle.outputFiles[0].text,{document,chrome,fetch,AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
- const pair=document.getElementById('pair');document.getElementById('pair-code').value='a'.repeat(43);
+ const pair=document.getElementById('pair');document.getElementById('hub-origin').value='https://mcp.kazuhahub.com';document.getElementById('pair-code').value='a'.repeat(43);
  const task=pair.onclick();assert.match(pair.textContent,/Pairing/);assert.equal(pair.getAttribute('aria-busy'),'true');assert.equal(document.getElementById('status').dataset.state,'loading');assert.equal(document.getElementById('forget').disabled,true);
  await pair.onclick();await document.getElementById('forget').onclick();assert.equal(requests,1);
  finish({ok:false,status:401});await task;
@@ -53,6 +54,6 @@ test('Firefox HTTP 403 pairing error distinguishes missing server support from a
  const browser={storage:{local:{get:async()=>({})}}};
  const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'firefox142',legalComments:'none'});
  runInNewContext(bundle.outputFiles[0].text,{document,browser,fetch:async()=>({ok:false,status:403}),AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
- document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
+ document.getElementById('hub-origin').value='https://mcp.kazuhahub.com';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
  assert.match(document.getElementById('status').textContent,/upgrade the UBC connector/);assert.doesNotMatch(document.getElementById('status').textContent,/expired/);assert.equal(document.getElementById('pair').disabled,false);
 });

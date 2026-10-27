@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "UBC Course Capture",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Preview and sync your UBC Workday course snapshots to your private connection.",
   "permissions": [
     "activeTab",
@@ -12,7 +12,11 @@
   "action": {
     "default_popup": "popup.html"
   },
-  "host_permissions": [
-    "https://mcp.kazuhahub.com/*"
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "optional_host_permissions": [
+    "https://*/*"
   ]
 }

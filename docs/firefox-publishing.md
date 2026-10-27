@@ -1,10 +1,10 @@
 # Firefox signing preparation
 
-Extension 0.2.3 is prepared for Firefox 142+. It selects the Promise-based browser
+Extension 0.3.0 is prepared for Firefox 142+. It selects the Promise-based browser
 namespace, tolerates Firefox's missing storage.setAccessLevel, and bounds local
 startup initialization. User feedback confirms that reloading the local build
-fixed the persistent Checking state. Live Firefox pairing/upload must still be
-verified after connector alpha.4 is deployed.
+fixed the persistent Checking state. Direct MCPHub connection requires connector alpha.5 or later. Live browser
+acceptance remains required after upgrading both components.
 
 Build from the accompanying source archive with Node 24+, npm ci and
 npm run build:firefox. The output is .data/firefox-extension, containing a root
@@ -26,10 +26,13 @@ Reviewable submission information:
 - Homepage/source: https://github.com/KKazuhaK/UBC-MCP
 - Privacy: docs/extension-privacy.md in the same source repository.
 - Data consent: authenticationInfo and websiteContent, no telemetry.
-- Purpose of host permission: pairing and explicit uploads to mcp.kazuhahub.com.
+- Optional HTTPS host permission: the user enters their own MCPHub origin and
+  grants access to that origin only; there is no prefilled public server.
 - activeTab/scripting: read the current UBC Workday DOM only on explicit action.
 - downloads: optional JSON export; storage: local upload credential.
-- No background script, remote code download or automatic registration action is implemented. Bundled validation dependencies are included in the source build.
+- A bundled background script completes approved Hub connection requests. It
+  neither uploads snapshots automatically nor performs registration actions. No
+  remote code is downloaded. Bundled validation dependencies are included in the source build.
 
 The script is bundled from TypeScript with esbuild and Zod validation. The source
 archive and lockfile supply the corresponding original source and dependencies.

@@ -110,3 +110,33 @@ test('pairing panel copies only the current code and clears it on expiry',async(
  await document.getElementById('copy').onclick();assert.equal(copied,'a'.repeat(43));assert.equal(document.getElementById('copy').textContent,'已复制');
  now+=3000;tick();assert.equal(document.getElementById('code').value,'');assert.equal(document.getElementById('copy').disabled,true);assert.match(document.getElementById('expires').textContent,/已过期/);
 });
+
+test('extension authorization uses Hub session and hands off only a one-use upload code',async t=>{
+ const {parseHTML}=await import('linkedom'),{runInNewContext}=await import('node:vm'),{page,script}=await import('../dist/connector/web.js');
+ const {url,store,saved}=await setup(t),{document,window}=parseHTML(page),nonce='a'.repeat(64),calls=[];
+ const fetchPage=async(path,options)=>{calls.push(path);return fetch(url+path,{...options,headers:{...options.headers,Cookie:'session=A',Origin:origin}});};
+ runInNewContext(script,{document,location:{hash:'#extension-auth='+nonce},MutationObserver:window.MutationObserver,fetch:fetchPage,AbortSignal,confirm:()=>false,alert:()=>{},navigator:{},console,setInterval,clearInterval});
+ await new Promise(r=>setTimeout(r,30));
+ assert.equal(document.getElementById('extension-login').hidden,false);
+ assert.equal(document.querySelector('main.layout').style.display,'none');assert.equal(document.getElementById('extension-account').textContent,'A');
+ await document.getElementById('extension-authorize').onclick();
+ const output=document.getElementById('ubc-extension-authorization'),payload=JSON.parse(output.textContent);
+ assert.equal(payload.state,nonce);assert.match(payload.code,/^[\w-]{43}$/);
+ const account=store.account('A');assert.equal(saved.get('A'),account.readToken);
+ assert.doesNotMatch(output.textContent,new RegExp(account.readToken));assert.doesNotMatch(output.textContent,new RegExp(account.uploadToken));
+ assert.equal(store.claim(payload.code).uploadToken,account.uploadToken);assert.equal(store.claim(payload.code),null);
+ output.textContent='';output.dataset.result='connected';await new Promise(r=>setImmediate(r));
+ assert.match(document.getElementById('status').textContent,/扩展已连接/);
+ assert.deepEqual(calls,['/ubc/api/status','/ubc/api/connect','/ubc/api/pair']);
+});
+
+test('connector advertises automatic authorization support without requiring a Hub cookie',async t=>{
+ const {url}=await setup(t);const response=await fetch(url+'/ubc/capabilities');assert.equal(response.status,200);assert.deepEqual(await response.json(),{extensionAuthorization:1});
+});
+
+test('a privileged extension request without an Origin header can claim its one-use code',async t=>{
+ const {url,call,store}=await setup(t);await call('connect');const code=store.pair('A').code;
+ const response=await fetch(url+'/ubc/api/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
+ assert.equal(response.status,200);assert.equal((await response.json()).uploadToken,store.account('A').uploadToken);
+ assert.equal(response.headers.get('access-control-allow-origin'),null);
+});

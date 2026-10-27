@@ -11,10 +11,17 @@ designed to discard your student name and student ID. It does not intentionally
 collect grades, finances, passwords, Workday cookies or browsing history.
 
 Preview and export do not upload snapshots. Only Upload sends the previewed data
-to https://mcp.kazuhahub.com/v1/snapshots over HTTPS. Pairing exchanges a single-use
-code for an upload-only credential at the same host. That credential is kept in
+to /v1/snapshots on the MCPHub HTTPS origin you explicitly choose. No public
+server is selected for new installations. Connect with MCPHub opens its UBC
+connection page, where you sign in and approve. A one-use code is automatically
+exchanged for an upload-only credential without copying a token or pairing code. That credential is kept in
 extension-local storage, not browser sync storage. There is no analytics or
-advertising endpoint and no background synchronization.
+advertising endpoint and no automatic background snapshot synchronization.
+A background worker completes the approved connection even if the popup closes.
+It injects a small handoff script only into the specific Hub authorization tab;
+that script reads the one-use code, not Hub cookies, profiles or session tokens.
+Site access is optional and requested only for the origin you enter. Upload
+credentials are bound to that origin and never reused for another server.
 
 The connector stores encrypted snapshots under your independent connection. The
 operator controls the server and encryption key and can access the stored data.
