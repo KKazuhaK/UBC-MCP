@@ -15,5 +15,7 @@ await copyFile('node_modules/zod/LICENSE',out+'/THIRD_PARTY_NOTICES.txt');
 await build({entryPoints:['src/collector/background.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/background.js',legalComments:'none'});
 await build({entryPoints:['src/collector/hub-link.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/hub-link.js',legalComments:'none'});
 
+await build({entryPoints:['src/collector/auto-sync.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/auto-sync.js',legalComments:'none'});
+
 await cp(out,'extension-firefox',{recursive:true,force:true});
 console.log('Firefox: load extension-firefox/manifest.json; extension/ is Chrome-only.');

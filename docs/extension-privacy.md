@@ -1,8 +1,7 @@
 # UBC Course Capture privacy
 
 UBC Course Capture is an independent project, not affiliated with UBC or Workday.
-It reads visible UBC Workday course information only when you choose a preview or
-export action. It can also validate a JSON snapshot you explicitly select.
+With your permission, it opens a short-lived background UBC Workday registration page every 15 minutes and uploads recognized registration snapshots. It also reads supported course-search pages while open. It can validate a JSON snapshot you explicitly select.
 
 Captured data may include course/section codes, titles, instructors, meeting dates,
 times and locations, published capacity and seat information. The separate
@@ -10,18 +9,16 @@ registration capture includes your registered/waitlisted course choices. It is
 designed to discard your student name and student ID. It does not intentionally
 collect grades, finances, passwords, Workday cookies or browsing history.
 
-Preview and export do not upload snapshots. Only Upload sends the previewed data
-to /v1/snapshots on the MCPHub HTTPS origin you explicitly choose. No public
+Automatic synchronization and manual upload send snapshots to /v1/snapshots on the MCPHub HTTPS origin you explicitly choose. Preview and export actions do not themselves upload snapshots. No public
 server is selected for new installations. Connect with MCPHub opens its UBC
 connection page, where you sign in and approve. A one-use code is automatically
 exchanged for an upload-only credential without copying a token or pairing code. That credential is kept in
 extension-local storage, not browser sync storage. There is no analytics or
-advertising endpoint and no automatic background snapshot synchronization.
+advertising endpoint. Automatic registration sync opens a temporary Workday page while the browser is running and the Workday session is valid. The user can pause sync. It does not read a full catalog or perform registration actions.
 A background worker completes the approved connection even if the popup closes.
 It injects a small handoff script only into the specific Hub authorization tab;
 that script reads the one-use code, not Hub cookies, profiles or session tokens.
-Site access is optional and requested only for the origin you enter. Upload
-credentials are bound to that origin and never reused for another server.
+Site access is optional and requested for the selected Hub origin and UBC Workday. Upload credentials are bound to the Hub origin and never reused for another server.
 
 The connector stores encrypted snapshots under your independent connection. The
 operator controls the server and encryption key and can access the stored data.

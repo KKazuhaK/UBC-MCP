@@ -15,6 +15,7 @@ test('extension pairing keeps only upload credential in trusted local storage an
  document.getElementById('hub-origin').value='https://mcp.kazuhahub.com';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
  assert.equal(requests[0].url,'https://mcp.kazuhahub.com/ubc/api/claim');assert.equal(requests[0].options.credentials,'omit');assert.equal(requests[0].options.redirect,'error');assert.equal(document.getElementById('pair-code').value,'');
  assert.deepEqual(Object.keys(state),['ubcConnection']);assert.equal(state.ubcConnection.uploadToken,'b'.repeat(43));assert.equal(state.ubcConnection.origin,'https://mcp.kazuhahub.com');
+ assert.equal(document.getElementById('connect-setup').hidden,true);assert.equal(document.getElementById('connected-actions').hidden,false);
  await document.getElementById('upload').onclick();assert.equal(requests.length,1);assert.match(document.getElementById('status').textContent,/Preview data first/);
  const timestamp=new Date().toISOString(),data=snapshot({capturedAt:timestamp,sections:[section({observedAt:timestamp})]});
  const input=document.getElementById('snapshot-file');input.files=[{size:100,text:async()=>JSON.stringify(data)}];
@@ -23,6 +24,7 @@ test('extension pairing keeps only upload credential in trusted local storage an
  await document.getElementById('upload').onclick();assert.equal(requests.length,2);assert.equal(requests[1].url,'https://mcp.kazuhahub.com/v1/snapshots');assert.equal(requests[1].options.headers.Authorization,'Bearer '+'b'.repeat(43));assert.equal(JSON.parse(requests[1].options.body).capturedAt,timestamp);
  input.files=[{size:100,text:async()=>'{"not":"snapshot"}'}];await input.onchange();assert.equal(document.getElementById('upload').disabled,true);
  await document.getElementById('forget').onclick();assert.equal(state.ubcConnection,undefined);assert.equal(document.getElementById('upload').disabled,true);
+ assert.equal(document.getElementById('connect-setup').hidden,false);assert.equal(document.getElementById('connected-actions').hidden,true);
 });
 
 test('extension shows pairing progress immediately, blocks duplicate actions and recovers after failure',async()=>{
@@ -56,4 +58,16 @@ test('Firefox HTTP 403 pairing error distinguishes missing server support from a
  runInNewContext(bundle.outputFiles[0].text,{document,browser,fetch:async()=>({ok:false,status:403}),AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
  document.getElementById('hub-origin').value='https://mcp.kazuhahub.com';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
  assert.match(document.getElementById('status').textContent,/upgrade the UBC connector/);assert.doesNotMatch(document.getElementById('status').textContent,/expired/);assert.equal(document.getElementById('pair').disabled,false);
+});
+
+test('connected users can pause and resume automatic sync without reconnecting',async()=>{
+ const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));
+ const state={ubcConnection:{origin:'https://hub.example.com',uploadToken:'b'.repeat(43)},ubcAutoSync:true};const messages=[];
+ const chrome={runtime:{sendMessage:async msg=>{messages.push(msg);return {ok:true};}},permissions:{request:async()=>true},storage:{local:{get:async()=>({...state}),set:async x=>Object.assign(state,x),remove:async()=>{}}}};
+ const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false});
+ runInNewContext(bundle.outputFiles[0].text,{document,chrome,AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
+ const toggle=document.getElementById('auto-toggle');assert.equal(toggle.textContent,'Pause automatic sync');
+ await toggle.onclick();assert.equal(state.ubcAutoSync,false);assert.equal(toggle.textContent,'Enable automatic sync');
+ await toggle.onclick();assert.equal(state.ubcAutoSync,true);assert.equal(toggle.textContent,'Pause automatic sync');
+ assert.deepEqual(messages.map(m=>m.type),['ubc.sync.configure','ubc.sync.configure']);
 });

@@ -11,14 +11,8 @@ grade-distribution request have passed live checks.
 
 The personal profile adds four tools over a user's isolated Workday snapshots.
 The snapshot connector, encryption, credential separation and revocation have
-automated integration coverage. A manual course-capture extension is included.
-It captures visible search results and an open section detail dialog; a separate
-explicit action captures private registrations from View My Courses. It does not
-silently fetch the full catalog or refresh source data. An installed-browser
-registration export passed a real local connector/MCP acceptance run. The hosted
-connector passed operator-reported synthetic checks. Self-service onboarding and
-extension upload are implemented in alpha.2 but await hosted/browser acceptance;
-course-search export acceptance remains outstanding.
+automated integration coverage. The browser extension can automatically synchronize registrations in a short-lived background Workday tab after the user grants access. It also synchronizes recognized course-search pages while they are open; it does not fetch the full catalog. An installed-browser
+registration export passed a real local connector/MCP acceptance run. Hosted self-service connection and registration synchronization have also been exercised with a real browser session. Course-search export acceptance remains outstanding.
 
 Workday UI fields were inspected in an authenticated browser on 2026-10-26.
 This is evidence of field availability, not evidence of a public Workday API or
@@ -70,21 +64,13 @@ in January 2027 with the 2027 Winter Session.
 
 ## Self-service connection (alpha.2)
 
-With the optional self-service routes deployed, open
-https://mcp.kazuhahub.com/ubc/ while signed in to Hub. Click Connect UBC, generate
-a five-minute single-use pairing code, and paste it into the extension. Preview
-the currently visible Workday course data or your registrations, then explicitly
-upload. No administrator-created binding, token copying, terminal or downloaded
-JSON is required. Offline JSON export remains available.
+With the optional self-service routes deployed, enter your own MCPHub HTTPS origin in the extension, grant access, and approve the connection in Hub. The extension automatically opens a temporary background registration page and syncs it every 15 minutes while the browser and Workday session remain available. Recognized course-search pages are synced while open. A manual sync button and offline JSON export remain available.
 
 The connection page calls existing Hub APIs as the signed-in user to save only
 that user's READ credential. It does not change Hub source, server configuration
-or permissions. Hub access rules still apply: the current private ubc-personal
-entry is available only to its owner and administrators. Other users cannot
-self-enroll until the operator separately authorizes their access in Hub.
+or permissions. Hub access rules still apply: each user must be allowed to access the `ubc-personal` service.
 
-The updated extension requests local storage and access only to the fixed sync
-host, in addition to activeTab/scripting/downloads. It stores the UPLOAD credential
+The extension requests local storage and optional access to the user-selected Hub origin and UBC Workday, in addition to activeTab/scripting/downloads. It stores the UPLOAD credential
 in extension-local trusted-context storage, never browser sync storage. Pairing
 codes must be kept private. Forgetting the extension's local connection does not
 revoke the server credential; use Disconnect on the connection page to revoke all
@@ -150,8 +136,7 @@ This starts a temporary loopback connector, checks personal MCP queries and
 revocation, prints aggregate results, then removes the temporary encrypted store.
 It does not upload the input file to the public Internet or delete the input file.
 
-Load the `extension/` folder as an unpacked Chrome extension. It requests only
-active-tab scripting and downloads, not cookies, persistent host access or passwords.
+Load the `extension/` folder as an unpacked Chrome extension, or build and load `extension-firefox/` for Firefox. Automatic synchronization requires user-granted host access to UBC Workday and the selected Hub. It does not read passwords or cookies.
 Log into Workday yourself and complete Duo. Navigate to **Find Course Sections**,
 select a specific Winter Term (not the umbrella Winter Session), and search.
 Refresh the results before capturing. Open a section detail dialog to include
@@ -180,7 +165,7 @@ the loaded Registered and Waitlisted rows, grouped into academic periods. It
 discards student names/IDs and does not collect grades or financial details.
 Keep that export private. The same push command accepts its snapshot array.
 Registration snapshots do not replace section-search availability snapshots.
-Automatic polling is not implemented in this alpha.
+Registration snapshots are refreshed through a temporary background Workday tab; course-search snapshots cover recognized open pages only.
 
 ## Interpretation
 
@@ -221,7 +206,7 @@ See [the container deployment guide](deploy/selfhost/README.md) for automated mu
 
 ### Connect the extension through your MCPHub
 
-Extension 0.3.0 and connector alpha.5 add **Connect with MCPHub**. New installations
+Extension 0.4.0 and connector alpha.5 support **Connect with MCPHub** and automatic sync of supported open pages. New installations
 start with an empty server field. Enter your own MCPHub HTTPS origin, allow access
 to that origin, sign in there, and approve the extension connection. No token or
 pairing code needs to be copied. The connection persists in local extension
@@ -237,5 +222,4 @@ than a new OAuth server. An outdated connector is reported before authorization.
 Credentials remain bound to their original origin when switching servers. Legacy
 0.2.x connections remain bound to their original deployment; they are never
 silently reassigned to a newly entered origin. Manual code pairing remains an
-advanced fallback. Snapshot capture/upload is still explicitly initiated; one-click
-Workday navigation and automatic synchronization are separate pending work.
+advanced fallback. The extension syncs registrations through a temporary background Workday tab every 15 minutes, plus recognized open course-search pages. A manual sync button and a pause control are available. It does not fetch the full catalog.

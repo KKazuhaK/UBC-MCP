@@ -1,6 +1,6 @@
 # Firefox signing preparation
 
-Extension 0.3.0 is prepared for Firefox 142+. It selects the Promise-based browser
+Extension 0.4.0 is prepared for Firefox 142+. It selects the Promise-based browser
 namespace, tolerates Firefox's missing storage.setAccessLevel, and bounds local
 startup initialization. User feedback confirms that reloading the local build
 fixed the persistent Checking state. Direct MCPHub connection requires connector alpha.5 or later. Live browser
@@ -30,11 +30,11 @@ Reviewable submission information:
 - Privacy: docs/extension-privacy.md in the same source repository.
 - Data consent: authenticationInfo and websiteContent, no telemetry.
 - Optional HTTPS host permission: the user enters their own MCPHub origin and
-  grants access to that origin only; there is no prefilled public server.
-- activeTab/scripting: read the current UBC Workday DOM only on explicit action.
-- downloads: optional JSON export; storage: local upload credential.
+  grants access to that origin and UBC Workday; there is no prefilled public server.
+- activeTab/scripting: read a temporary background registration page and supported open course-search pages after the user grants Workday site access.
+- downloads: optional JSON export; storage: local upload credential; alarms: periodic background registration sync.
 - A bundled background script completes approved Hub connection requests. It
-  neither uploads snapshots automatically nor performs registration actions. No
+  automatically uploads recognized snapshots, but never performs registration actions. No
   remote code is downloaded. Bundled validation dependencies are included in the source build.
 
 The script is bundled from TypeScript with esbuild and Zod validation. The source

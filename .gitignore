@@ -17,3 +17,5 @@ extension/background.js
 extension/hub-link.js
 
 extension-firefox/
+
+extension/auto-sync.js

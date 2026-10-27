@@ -8,12 +8,12 @@ const extensionApi=typeof browser!=='undefined'?browser:chrome;
 let origin=DEFAULT_HUB;
 const el=(id:string)=>document.getElementById(id)!;
 const status=el('status');
-let pending:Snapshot[]=[],busy=false,paired=false;
+let pending:Snapshot[]=[],busy=false,paired=false,autoSync=false;
 function feedback(message:string,state:'loading'|'success'|'error'|'info'='info') {
   status.textContent=message;status.dataset.state=state;
 }
 function controls() {
-  document.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled=busy||(b.id==='upload'&&(!paired||!pending.length)));
+  document.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled=busy||(b.id==='upload'&&(!paired||!pending.length))||(b.id==='sync-all'&&(!paired||!autoSync))||(b.id==='auto-toggle'&&!paired));
   document.querySelectorAll<HTMLInputElement>('input').forEach(i=>i.disabled=busy);
   el('upload-hint').textContent=!paired?'Pair your account before uploading.':pending.length?`${pending.length} period(s) ready. Review the preview before uploading.`:'Preview a Workday page or import a file to enable upload.';
 }
@@ -28,12 +28,17 @@ async function action(id:string,label:string,work:()=>Promise<void>) {
   const button=el(id),original=button.textContent;
   if(button.tagName==='BUTTON'){button.textContent=label;button.setAttribute('aria-busy','true');}
   feedback(label,'loading');
-  try{await work();}catch(e){feedback(errorMessage(e),'error');}
-  finally{busy=false;document.body.setAttribute('aria-busy','false');if(button.tagName==='BUTTON'){button.textContent=original;button.removeAttribute('aria-busy');}controls();}
+  let completed=false;
+  try{await work();completed=true;}catch(e){feedback(errorMessage(e),'error');}
+  finally{busy=false;document.body.setAttribute('aria-busy','false');if(button.tagName==='BUTTON'){if(id!=='auto-toggle'||!completed)button.textContent=original;button.removeAttribute('aria-busy');}controls();}
 }
 async function showConnection() {
-  const x=await extensionApi.storage.local.get(['ubcUploadToken','ubcConnection','ubcHubOrigin','ubcAuthorization']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;origin=connection?.origin??DEFAULT_HUB;
+  const x=await extensionApi.storage.local.get(['ubcUploadToken','ubcConnection','ubcHubOrigin','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;origin=connection?.origin??DEFAULT_HUB;
+  autoSync=!!x.ubcAutoSync;
   el('connection').textContent=connection?`Connected · ${connection.origin}`:'Not connected · Sign in through your MCPHub.';
+  el('connect-setup').hidden=paired;el('connected-actions').hidden=!paired;
+  el('auto-status').textContent=!paired?'Connect to MCPHub to sync.':x.ubcSyncError?`Sync issue: ${x.ubcSyncError}`:x.ubcAutoSync?`Automatic sync is on.${x.ubcLastSync?.at?' Last sync: '+new Date(x.ubcLastSync.at).toLocaleString()+'.':''}`:'Enable automatic sync with the button below.';
+  el('auto-toggle').textContent=x.ubcAutoSync?'Pause automatic sync':'Enable automatic sync';
   return x;
 }
 // Credentials stay in trusted extension-local storage, never page or sync storage.
@@ -47,7 +52,7 @@ async function initialize(){
       const data=await showConnection();(el('hub-origin') as HTMLInputElement).value=data.ubcHubOrigin??(paired?origin:'');
     };
     await Promise.race([setup(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Could not read the local connection. Reopen the extension or reload it, then try again.')),8000);})]);
-    feedback(paired?'Ready. Preview data to sync.':'Ready. Enter your MCPHub address to connect.');
+    feedback(paired?'Connected. Workday sync is ready.':'Ready. Enter your MCPHub address to connect.');
   }catch(e){el('connection').textContent='Local connection could not be checked.';feedback(errorMessage(e),'error');}
   finally{if(timer)clearTimeout(timer);busy=false;controls();}
 }
@@ -70,7 +75,8 @@ el('pair').onclick=()=>action('pair','Pairing with your account…',async()=>{
   await extensionApi.storage.local.set({ubcConnection:{origin,uploadToken:x.uploadToken}});await showConnection();feedback('Account paired. Next, preview your Workday data.','success');
 });
 el('forget').onclick=()=>action('forget','Removing local connection…',async()=>{
-  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization']);pending=[];el('preview').textContent='';await showConnection();
+  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']);pending=[];el('preview').textContent='';await showConnection();
+  try{await extensionApi.runtime.sendMessage({type:'ubc.sync.stop'});}catch{/* The local connection is already removed. */}
   feedback('Local connection removed. To revoke server access and delete snapshots, use the connection page.','success');
 });
 async function capture(kind:'sections'|'registrations'):Promise<Snapshot[]> {
@@ -125,13 +131,34 @@ for(const [id,kind]of [['capture','sections'],['registrations','registrations']]
 
 el('hub-login').onclick=()=>action('hub-login','Opening your MCPHub…',async()=>{
   const selected=hubOrigin((el('hub-origin') as HTMLInputElement).value);
-  if(!await extensionApi.permissions.request({origins:[selected+'/*']}))throw new Error('Allow access to your selected MCPHub to continue.');
+  if(!await extensionApi.permissions.request({origins:[selected+'/*','https://wd10.myworkday.com/*']}))throw new Error('Allow access to your selected MCPHub and UBC Workday to continue.');
+  await extensionApi.storage.local.set({ubcAutoSync:true});
   const response=await extensionApi.runtime.sendMessage({type:'ubc.authorize.start',origin:selected});
   if(!response?.ok)throw new Error(response?.error??'Could not open your MCPHub.');
   feedback('Continue in the MCPHub tab. This popup can be closed.');
 });
+el('sync-all').onclick=()=>action('sync-all','Syncing open Workday pages…',async()=>{
+  if(!paired)throw new Error('Connect to MCPHub first.');
+  if(!await extensionApi.permissions.request({origins:['https://wd10.myworkday.com/*']}))throw new Error('Allow UBC Workday access to enable automatic sync.');
+  await extensionApi.storage.local.set({ubcAutoSync:true});
+  const result=await extensionApi.runtime.sendMessage({type:'ubc.sync.all'});
+  if(!result?.ok)throw new Error(result?.error??'Could not sync Workday.');
+  await showConnection();
+  if(result.error&&result.readable){feedback(`Synced ${result.count} snapshot(s), but another page failed: ${result.error}`,'error');return;}
+  if(result.error)throw new Error(result.error);
+  if(!result.readable)throw new Error('Could not sync Workday. Sign in to Workday and try again.');
+  feedback(`Synced ${result.count} Workday snapshot(s).`,'success');
+});
+el('auto-toggle').onclick=()=>action('auto-toggle','Updating automatic sync…',async()=>{
+  const previous=autoSync;
+  if(!previous&&!await extensionApi.permissions.request({origins:['https://wd10.myworkday.com/*']}))throw new Error('Allow UBC Workday access to enable automatic sync.');
+  await extensionApi.storage.local.set({ubcAutoSync:!previous,ubcSyncError:null});
+  const response=await extensionApi.runtime.sendMessage({type:'ubc.sync.configure'});
+  if(!response?.ok)throw new Error(response?.error??'Could not update automatic sync.');
+  await showConnection();feedback(previous?'Automatic sync paused.':'Automatic sync enabled.','success');
+});
 if(extensionApi.storage.onChanged)extensionApi.storage.onChanged.addListener((changes,area)=>{
-  if(area!=='local'||!('ubcAuthorization'in changes||'ubcConnection'in changes))return;
+  if(area!=='local'||!('ubcAuthorization'in changes||'ubcConnection'in changes||'ubcLastSync'in changes||'ubcAutoSync'in changes||'ubcSyncError'in changes))return;
   void showConnection().then(data=>{
     const a=data.ubcAuthorization;
     if(a?.status==='connected')feedback('Connected through MCPHub. Your connection is saved for future syncs.','success');
