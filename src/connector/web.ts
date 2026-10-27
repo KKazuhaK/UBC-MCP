@@ -7,11 +7,11 @@ export const page=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta
 <p id="status" role="status" aria-live="polite" aria-atomic="true" data-state="loading">正在检查连接…</p>
 <section id="extension-login" class="card" hidden><h2>连接 UBC Course Capture 扩展</h2><p>当前 Hub 账号：<strong id="extension-account">正在验证…</strong></p><p>使用当前 MCPHub 账号连接此浏览器。扩展可上传你选择的课程快照，不会读取 Hub 或 Workday 的密码与 Cookie。</p><button id="extension-authorize">授权并连接扩展</button><p id="extension-result" class="subtle"></p><output id="ubc-extension-authorization" hidden></output></section><main class="layout"><div class="stack"><section class="card"><div class="card-head"><div><h2>设置你的连接</h2><span class="subtle">三步完成，只需配对一次。</span></div><span id="account-state" class="badge">检查中</span></div>
 <ol class="steps"><li class="step"><span class="num first">1</span><div><h3>连接 Hub 账号</h3><p>使用当前登录账号创建独立连接，数据只供这个账号查询。</p><button id="connect">连接 UBC</button></div></li>
-<li class="step"><span class="num">2</span><div><h3>连接浏览器扩展</h3><p>在扩展中填写当前 MCPHub 地址，点击 Connect with MCPHub，并在此站点确认连接，无需复制 Token 或配对码。</p><details><summary>手动配对（兼容旧版扩展）</summary><button id="pair" class="secondary">生成配对码</button><section id="pairing" class="pair-box" hidden><div class="pair-title"><h3>一次性配对码</h3><span id="expires">5 分钟内有效</span></div><div class="code-row"><textarea id="code" aria-label="一次性配对码" readonly spellcheck="false"></textarea><button id="copy" class="secondary" disabled>复制</button></div><p class="pair-note">只能使用一次，请勿分享给其他人。生成新码后，旧码立即失效。</p></section></details></div></li>
+<li class="step"><span class="num">2</span><div><h3>连接浏览器扩展</h3><p>在扩展中填写当前 MCPHub 地址，点击 Connect with MCPHub，并在此站点确认连接。</p><details><summary>手动配对（兼容旧版扩展）</summary><button id="pair" class="secondary">生成配对码</button><section id="pairing" class="pair-box" hidden><div class="pair-title"><h3>一次性配对码</h3><span id="expires">5 分钟内有效</span></div><div class="code-row"><textarea id="code" aria-label="一次性配对码" readonly spellcheck="false"></textarea><button id="copy" class="secondary" disabled>复制</button></div><p class="pair-note">只能使用一次，请勿分享给其他人。生成新码后，旧码立即失效。</p></section></details></div></li>
 <li class="step"><span class="num">3</span><div><h3>预览并同步</h3><p>打开 Workday，在扩展里预览课表或班次，再点击上传。完成后即可关闭浏览器。</p></div></li></ol></section>
 <section class="card"><div class="card-head"><div><h2 class="sync-title">最近同步 <span id="period-count" class="counter">0 个记录</span></h2><span class="subtle">这里显示服务器保存的最新快照。</span></div></div><div id="scopes">正在读取同步记录…</div></section></div>
 <aside class="card"><p class="aside-title">关于这条连接</p><div class="info-row"><strong>密码留在浏览器</strong><p>无需向服务器提供 Workday 密码或 Cookie。注册记录不包含你的姓名和学号。</p></div><div class="info-row"><strong>由你决定何时同步</strong><p>只有点击上传才会同步。名额与课表发生变化后，请重新刷新并上传。</p></div><div class="info-row"><strong>连接到 MCP 客户端</strong><p>在支持远程 MCP 的客户端中添加：</p><code class="endpoint">https://mcp.kazuhahub.com/mcp/ubc-personal</code></div><details><summary>连接管理</summary><p>断开会撤销所有读写凭证，并删除当前快照。历史备份按服务器保留策略处理。</p><button id="disconnect" class="danger">断开并删除我的数据</button></details></aside></main>
-<footer><span>独立项目，与 UBC 或 Workday 无隶属关系。</span><span>快照查询 · 不会自动选课</span></footer></div>
+<footer><span>此项目为独立项目，与 UBC 或 Workday 无隶属关系。</span><span>快照查询 · 不会自动选课</span></footer></div>
 <script src="/ubc/app.js" defer></script></html>`;
 export const script=String.raw`const $=id=>document.getElementById(id);let busy=false,connected=false;
 const extensionState=/^#extension-auth=([a-f0-9]{64})$/.exec(typeof location==='undefined'?'':location.hash)?.[1];
@@ -35,7 +35,7 @@ if(extensionState){
   });
   const output=$('ubc-extension-authorization');
   new MutationObserver(()=>{if(output.dataset.result==='connected'){
-    $('extension-authorize').disabled=true;$('extension-result').textContent='已连接。可以关闭此页面，回到扩展同步课程。';feedback('扩展已连接，无需复制 Token 或配对码。','success');
+    $('extension-authorize').disabled=true;$('extension-result').textContent='已连接。可以关闭此页面，回到扩展同步课程。';feedback('扩展已连接。','success');
   }else if(output.dataset.result==='error')feedback(output.dataset.message||'连接失败，请从扩展重新开始。','error');}).observe(output,{attributes:true});
 }
 void run('refresh',status);`;
