@@ -1,6 +1,6 @@
 {
   "name": "ubc-mcp",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "description": "UBC course discovery and registration planning with isolated personal Workday snapshots",
   "type": "module",
   "private": true,

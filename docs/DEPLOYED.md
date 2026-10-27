@@ -95,3 +95,19 @@ has not been expanded.
 Extension 0.2.1 adds validated JSON file import preview for synthetic acceptance
 and existing exports. All 35 tests pass with import-preview/explicit-upload
 coverage. No connector upgrade is needed for this extension patch.
+
+## UI feedback upgrade prepared — alpha.3 / extension 0.2.2
+
+Extension controls now use spaced stacked actions, primary/secondary styles and
+three numbered steps. A sticky top status shows loading, success and actionable
+errors. Pairing, file parsing, page capture, export and upload share a busy guard;
+controls recover on failure. Upload shows per-period progress and a revoked
+credential is removed locally. The optional export controls are collapsed.
+The /ubc/ page adds immediate action-specific loading labels, spinners, disabled
+controls, explicit timeout feedback and responsive action spacing. No Hub change
+is needed. Local synthetic browser previews verified layout and visible pending
+states; the production website remains alpha.2 until its operator upgrades only
+the connector. The extension requires refreshing the existing unpacked extension.
+37 local tests and protocol checks pass, including delayed-request duplicate-click
+and error-recovery tests. No real tokens, user bindings or snapshots were used
+for this UI review.

@@ -1,7 +1,7 @@
 name: ubc-mcp
 services:
   ubc-connector:
-    image: ubc-mcp:0.1.0-alpha.2
+    image: ubc-mcp:0.1.0-alpha.3
     build:
       context: ..
     entrypoint: ["node", "dist/connector/cli.js", "serve"]

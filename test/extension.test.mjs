@@ -23,3 +23,16 @@ test('extension pairing keeps only upload credential in trusted local storage an
  input.files=[{size:100,text:async()=>'{"not":"snapshot"}'}];await input.onchange();assert.equal(document.getElementById('upload').disabled,true);
  await document.getElementById('forget').onclick();assert.equal(state.ubcUploadToken,undefined);assert.equal(document.getElementById('upload').disabled,true);
 });
+
+test('extension shows pairing progress immediately, blocks duplicate actions and recovers after failure',async()=>{
+ const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));let finish,requests=0;
+ const chrome={storage:{local:{setAccessLevel:async()=>{},get:async()=>({}),set:async()=>{},remove:async()=>{}}}};
+ const fetch=()=>{requests++;return new Promise(r=>finish=r);};
+ const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120',legalComments:'none'});
+ runInNewContext(bundle.outputFiles[0].text,{document,chrome,fetch,AbortSignal,URL,Blob,console});await new Promise(r=>setImmediate(r));
+ const pair=document.getElementById('pair');document.getElementById('pair-code').value='a'.repeat(43);
+ const task=pair.onclick();assert.match(pair.textContent,/Pairing/);assert.equal(pair.getAttribute('aria-busy'),'true');assert.equal(document.getElementById('status').dataset.state,'loading');assert.equal(document.getElementById('forget').disabled,true);
+ await pair.onclick();await document.getElementById('forget').onclick();assert.equal(requests,1);
+ finish({ok:false,status:401});await task;
+ assert.equal(pair.textContent,'Pair extension');assert.equal(pair.disabled,false);assert.equal(pair.hasAttribute('aria-busy'),false);assert.equal(document.getElementById('status').dataset.state,'error');assert.match(document.getElementById('status').textContent,/Generate a new code/);assert.equal(document.getElementById('upload').disabled,true);
+});

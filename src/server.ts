@@ -9,7 +9,7 @@ export function createServer(env=process.env) {
   const personal=new Personal(profile==='personal'?{
     file:env.UBC_SNAPSHOT_FILE,url:env.UBC_CONNECTOR_URL,token:env.UBC_CONNECTOR_TOKEN}:{});
   if (profile==='personal'&&!personal.configured()) throw new Error('Personal profile requires its own snapshot file or connector URL/token; shared fallback is forbidden');
-  const server=new McpServer({name:'ubc-mcp',version:'0.1.0-alpha.2'}), tools=new Tools(personal);
+  const server=new McpServer({name:'ubc-mcp',version:'0.1.0-alpha.3'}), tools=new Tools(personal);
   for (const def of tools.definitions()) server.registerTool(def.name,{
     description:def.description,inputSchema:def.schema,
     annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},

@@ -69,7 +69,7 @@ test('connection GUI connects, displays pairing, cancels deletion and shows serv
  const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/web.js');
  const {document}=parseHTML(page),calls=[];let connected=false,allowDelete=false,fail=false;
  const fetch=async(url,options)=>{calls.push({url,options});if(fail)return {ok:false,json:async()=>({message:'Sign in to Hub'})};const action=url.split('/').at(-1);if(action==='connect')connected=true;if(action==='disconnect')connected=false;return {ok:true,json:async()=>action==='status'?{connected,scopes:[]}:action==='pair'?{code:'one-use-code'}:{connected}};};
- runInNewContext(script,{document,fetch,confirm:()=>allowDelete,alert:()=>{}});
+ runInNewContext(script,{document,fetch,AbortSignal,confirm:()=>allowDelete,alert:()=>{}});
  await new Promise(r=>setImmediate(r));
  await document.getElementById('connect').onclick();assert.equal(connected,true);
  assert.match(document.getElementById('status').textContent,/已连接/);
@@ -78,4 +78,14 @@ test('connection GUI connects, displays pairing, cancels deletion and shows serv
  allowDelete=true;await document.getElementById('disconnect').onclick();assert.equal(connected,false);assert.equal(document.getElementById('code').value,'');
  fail=true;await document.getElementById('refresh').onclick();assert.equal(document.getElementById('status').textContent,'Sign in to Hub');
  assert.ok(calls.every(c=>c.options.credentials==='same-origin'&&c.options.redirect==='error'));
+});
+
+test('connection page exposes slow-request progress, rejects duplicate clicks and recovers from timeout',async()=>{
+ const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/web.js');
+ const {document}=parseHTML(page);let rejectConnect,requests=0;
+ const fetch=async(url)=>{if(url.endsWith('/status'))return {ok:true,json:async()=>({connected:false,scopes:[]})};requests++;return new Promise((resolve,reject)=>rejectConnect=reject);};
+ runInNewContext(script,{document,fetch,AbortSignal,confirm:()=>true,alert:()=>{}});await new Promise(r=>setImmediate(r));
+ const b=document.getElementById('connect'),task=b.onclick();assert.match(b.textContent,/正在连接/);assert.equal(b.getAttribute('aria-busy'),'true');assert.equal(document.getElementById('status').dataset.state,'loading');assert.equal(document.getElementById('refresh').disabled,true);
+ await b.onclick();assert.equal(requests,1);const error=new Error('timeout');error.name='TimeoutError';rejectConnect(error);await task;
+ assert.equal(b.disabled,false);assert.equal(b.getAttribute('aria-busy'),null);assert.equal(document.getElementById('status').dataset.state,'error');assert.match(document.getElementById('status').textContent,/连接超时/);
 });

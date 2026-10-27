@@ -1,0 +1,13 @@
+请将独立 UBC connector 从 0.1.0-alpha.2 升级至 0.1.0-alpha.3，以更新 /ubc/ 页面的加载反馈与布局。
+发布：https://github.com/KKazuhaK/UBC-MCP/releases/tag/v0.1.0-alpha.3
+
+不修改或重启 MCPHub，不修改 Hub 源码、镜像、Compose、数据库、服务定义、可见性或登录配置。已有 alpha.1 Hub stdio 查询客户端继续兼容，无需升级。只更新 /opt/ubc-connector 的 app 和独立镜像，保留全部数据目录、encryption.key、UID、网络、环境变量、隔离设置和已有 nginx 路由。
+
+1. 备份当前 app/、Dockerfile 和 Compose。新包按该 release 的 SHA256SUMS.txt 校验。此次没有新增运行依赖、数据库迁移或新路由。
+2. 解包新版编译包到 app。沿用现有 Docker 构建方式；此前 npm tgz 文件固定 mtime 导致缓存问题，本次必须使用无缓存构建，或刷新构建上下文 mtime，并逐一比对容器内 dist 与新版 app 的 SHA256，尤其是 dist/connector/web.js。
+3. 只重建 UBC connector，不动 Hub，不清空 data/。沿用 UBC_PUBLIC_ORIGIN=https://mcp.kazuhahub.com。页面及脚本保持 no-store。
+4. 验证 /ubc/ 和 /ubc/app.js；新页面按钮有间距、主次样式，首次加载与 Connect/Pair/Refresh/Disconnect 会立刻显示对应操作文案及 spinner，等待期间按钮禁用，失败后恢复并显示明确错误。
+5. 运行源码 npm test（37 项）和 npm run test:protocol，验证原有健康检查与未授权拒绝仍正常。不要操作真实用户凭证、删除用户数据或上传真实课表来验收 UI。
+6. 如失败，只回滚 app/ 和镜像，不恢复或覆盖生产 data/。报告已生效版本、文件比对、验证与未完成项。
+
+扩展独立升级为 0.2.2：本机刷新已加载目录，或下载该 release 的扩展 ZIP 后解压再加载。它保持原有权限，服务端 alpha.2 也可使用新版扩展；无需为扩展先升级 Hub 或 connector。
