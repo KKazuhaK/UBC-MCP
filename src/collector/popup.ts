@@ -1,3 +1,4 @@
+import {parseSnapshot} from '../model.js';
 import {extractWorkdayDom} from './dom.js';
 import {normalizeCapture} from './normalize.js';
 import {extractRegistrationDom,normalizeRegistrations} from './registrations.js';
@@ -45,6 +46,10 @@ el('pair').onclick=async()=>{
   }catch(e){status.textContent=e instanceof Error?e.message:'Pairing failed';}
 };
 el('forget').onclick=async()=>{await chrome.storage.local.remove('ubcUploadToken');pending=[];(el('upload') as HTMLButtonElement).disabled=true;el('preview').textContent='';await showConnection();status.textContent='Local credential removed. To revoke server access and delete data, use the connection page.';};
+function showPreview(){
+    el('preview').textContent=pending.map(s=>`${s.campus} ${s.academicPeriod.id} · ${s.kind}\n${s.sections.length} sections · ${s.capturedAt}\n`+s.sections.map(c=>`${c.subject} ${c.course} ${c.code}`).join('\n')).join('\n\n');
+    (el('upload') as HTMLButtonElement).disabled=false;status.textContent='Review above. Upload sends these course selections to your private UBC connection.';
+}
 async function preview(kind:'sections'|'registrations') {
   pending=[];(el('upload') as HTMLButtonElement).disabled=true;el('preview').textContent='';
   try{
@@ -55,8 +60,7 @@ async function preview(kind:'sections'|'registrations') {
     }else{
       const [r]=await chrome.scripting.executeScript({target:{tabId:tab.id},func:extractRegistrationDom});if(!r?.result)throw new Error('No capture');pending=normalizeRegistrations(r.result);
     }
-    el('preview').textContent=pending.map(s=>`${s.campus} ${s.academicPeriod.id} · ${s.kind}\n${s.sections.length} sections · ${s.capturedAt}\n`+s.sections.map(c=>`${c.subject} ${c.course} ${c.code}`).join('\n')).join('\n\n');
-    (el('upload') as HTMLButtonElement).disabled=false;status.textContent='Review above. Upload sends these course selections to your private UBC connection.';
+    showPreview();
   }catch(e){status.textContent=e instanceof Error?e.message:'Preview failed';}
 }
 el('preview-sections').onclick=()=>preview('sections');el('preview-registrations').onclick=()=>preview('registrations');
@@ -72,4 +76,16 @@ el('upload').onclick=async()=>{
     }
     status.textContent=`Synced ${completed} periods. You can close Chrome. Data stays a snapshot until you sync again.`;
   }catch(e){status.textContent=e instanceof Error?e.message:'Upload failed';}
+};
+
+el('snapshot-file').onchange=async()=>{
+  const input=el('snapshot-file') as HTMLInputElement;
+  pending=[];(el('upload') as HTMLButtonElement).disabled=true;el('preview').textContent='';
+  try{
+    const file=input.files?.[0];if(!file)return;
+    if(file.size>4_000_000)throw new Error('Snapshot file must be at most 4 MB');
+    const data=JSON.parse(await file.text()),items=Array.isArray(data)?data:[data];
+    if(!items.length||items.length>20)throw new Error('Expected 1–20 snapshots');
+    pending=items.map(s=>parseSnapshot(s));showPreview();
+  }catch(e){status.textContent=e instanceof Error?e.message:'Invalid snapshot file';}finally{input.value='';}
 };

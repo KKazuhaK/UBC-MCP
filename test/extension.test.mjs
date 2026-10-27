@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {build} from 'esbuild';
 import {runInNewContext} from 'node:vm';
 import {parseHTML} from 'linkedom';
+import {snapshot,section} from './fixtures.mjs';
 test('extension pairing keeps only upload credential in trusted local storage and requires explicit preview',async()=>{
  const {document}=parseHTML(readFileSync('extension/popup.html','utf8')),state={},requests=[];let access;
  const chrome={storage:{local:{setAccessLevel:async x=>{access=x.accessLevel;},get:async()=>({...state}),set:async x=>Object.assign(state,x),remove:async key=>{delete state[key];}}}};
@@ -15,5 +16,10 @@ test('extension pairing keeps only upload credential in trusted local storage an
  assert.equal(requests[0].url,'https://mcp.kazuhahub.com/ubc/api/claim');assert.equal(requests[0].options.credentials,'omit');assert.equal(requests[0].options.redirect,'error');assert.equal(document.getElementById('pair-code').value,'');
  assert.deepEqual(Object.keys(state),['ubcUploadToken']);assert.equal(state.ubcUploadToken,'b'.repeat(43));
  await document.getElementById('upload').onclick();assert.equal(requests.length,1);assert.match(document.getElementById('status').textContent,/Preview data first/);
+ const timestamp=new Date().toISOString(),data=snapshot({capturedAt:timestamp,sections:[section({observedAt:timestamp})]});
+ const input=document.getElementById('snapshot-file');input.files=[{size:100,text:async()=>JSON.stringify(data)}];
+ await input.onchange();assert.equal(document.getElementById('upload').disabled,false);assert.equal(requests.length,1);
+ await document.getElementById('upload').onclick();assert.equal(requests.length,2);assert.equal(requests[1].url,'https://mcp.kazuhahub.com/v1/snapshots');assert.equal(requests[1].options.headers.Authorization,'Bearer '+'b'.repeat(43));assert.equal(JSON.parse(requests[1].options.body).capturedAt,timestamp);
+ input.files=[{size:100,text:async()=>'{"not":"snapshot"}'}];await input.onchange();assert.equal(document.getElementById('upload').disabled,true);
  await document.getElementById('forget').onclick();assert.equal(state.ubcUploadToken,undefined);assert.equal(document.getElementById('upload').disabled,true);
 });
