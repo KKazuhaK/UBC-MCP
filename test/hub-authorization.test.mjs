@@ -28,7 +28,10 @@ test('Hub addresses are explicit HTTPS origins and a saved token stays bound to 
  assert.equal(hubOrigin(' https://my-hub.example.com/ '),'https://my-hub.example.com');
  const data={ubcConnection:{origin:'https://original.example.com',uploadToken:'a'.repeat(43)},ubcHubOrigin:'https://other.example.com'};
  assert.equal(storedConnection(data).origin,'https://original.example.com');
- assert.equal(storedConnection({ubcUploadToken:'b'.repeat(43)}).origin,'https://mcp.kazuhahub.com');
+ // No origin is built in: a legacy token without an origin is not connected unless the build supplied one.
+ assert.equal(storedConnection({ubcUploadToken:'b'.repeat(43)}),null);
+ globalThis.__UBC_LEGACY_HUB__='https://legacy.example.test/';
+ try{assert.equal(storedConnection({ubcUploadToken:'b'.repeat(43)}).origin,'https://legacy.example.test');}finally{delete globalThis.__UBC_LEGACY_HUB__;}
 });
 test('Hub authorization opens the chosen host and only its original browser tab may claim',async()=>{
  const b=await background(),origin='https://my-hub.example.com';

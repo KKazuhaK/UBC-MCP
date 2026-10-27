@@ -41,9 +41,18 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Release tag must match package.json
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          v="$(node -p "require('./package.json').version")"
+          [ "$TAG" = "v$v" ] || { echo "tag $TAG does not equal v$v from package.json" >&2; exit 1; }
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run test:protocol
+      - run: npm run test:smoke
 
   meta:
     needs: verify

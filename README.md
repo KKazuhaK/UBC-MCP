@@ -1,7 +1,9 @@
 # UBC MCP
 
-UBC course discovery and registration planning, designed for MCPHub deployment.
-Independent project; not affiliated with UBC or Workday.
+UBC course discovery and registration planning as a standalone MCP server that
+works with any standard MCP client. No hosting platform, account service or
+hardcoded server address is required. Independent project; not affiliated with
+UBC or Workday.
 
 ## Current alpha
 
@@ -33,7 +35,18 @@ The default transport is stdio. stdout is reserved for MCP protocol messages.
 personal environment credentials and cannot expose personal tools.
 
 Configure an MCP client with `node` as the command and the absolute path to
-`dist/cli.js` as its argument. No public-source API key is required.
+`dist/cli.js` as its argument. No public-source API key is required. For
+example, in a client that uses the common `mcpServers` JSON format:
+
+```json
+{"mcpServers":{"ubc":{"command":"node","args":["/absolute/path/to/dist/cli.js"]}}}
+```
+
+A stdio container image (`Dockerfile`, published by the `MCP server image`
+workflow as `ghcr.io/kkazuhak/ubc-mcp` once a release is tagged) runs with
+`docker run -i --rm`.
+`node dist/cli.js --version` prints the package version, which is read from
+`package.json` (a single source also used by the connector's `/healthz`).
 
 ## Tools
 
@@ -62,27 +75,15 @@ are stored as separate snapshot kinds; schedule checks can select either kind.
 This prevents confusing Winter Term 2
 in January 2027 with the 2027 Winter Session.
 
-## Self-service connection (alpha.2)
-
-With the optional self-service routes deployed, enter your own MCPHub HTTPS origin in the extension, grant access, and approve the connection in Hub. The extension automatically opens a temporary background registration page and syncs it every 15 minutes while the browser and Workday session remain available. Recognized course-search pages are synced while open. A manual sync button and offline JSON export remain available.
-
-The connection page calls existing Hub APIs as the signed-in user to save only
-that user's READ credential. It does not change Hub source, server configuration
-or permissions. Hub access rules still apply: each user must be allowed to access the `ubc-personal` service.
-
-The extension requests local storage and optional access to the user-selected Hub origin and UBC Workday, in addition to activeTab/scripting/downloads. It stores the UPLOAD credential
-in extension-local trusted-context storage, never browser sync storage. Pairing
-codes must be kept private. Forgetting the extension's local connection does not
-revoke the server credential; use Disconnect on the connection page to revoke all
-credentials and delete current snapshots. Historical backups have separate retention.
-
 ## Connect a personal snapshot (local / administrative tools)
 
 For local verification, set `UBC_PROFILE=personal` and `UBC_SNAPSHOT_FILE` to an
 absolute private JSON file path. Never point a shared Hub service at an
 individual's file.
 
-For multi-user use, start the connector with `npm run connector`. It binds
+For multi-user use, start the connector with `npm run connector`. It needs no
+platform: `GET /healthz` returns `{"ok":true,"version":...}` and the bearer-token
+snapshot API works with the CLI alone. It binds
 loopback by default. Provision a binding using the local administrative CLI:
 
 ```sh
@@ -136,7 +137,7 @@ This starts a temporary loopback connector, checks personal MCP queries and
 revocation, prints aggregate results, then removes the temporary encrypted store.
 It does not upload the input file to the public Internet or delete the input file.
 
-Load the `extension/` folder as an unpacked Chrome extension, or build and load `extension-firefox/` for Firefox. Automatic synchronization requires user-granted host access to UBC Workday and the selected Hub. It does not read passwords or cookies.
+The extension has no built-in server address. Load the `extension/` folder as an unpacked Chrome extension, or build and load `extension-firefox/` for Firefox. Automatic synchronization requires user-granted host access to UBC Workday and the server address you enter (see the optional MCPHub section). Without a server, use the offline export and `push` flow below. It does not read passwords or cookies.
 Log into Workday yourself and complete Duo. Navigate to **Find Course Sections**,
 select a specific Winter Term (not the umbrella Winter Session), and search.
 Refresh the results before capturing. Open a section detail dialog to include
@@ -186,13 +187,15 @@ Registration snapshots are refreshed through a temporary background Workday tab;
 
 ## Deploy and validate
 
-See [Hub deployment](deploy/mcphub/README.md). Keep the public profile lightweight;
-run the connector in an isolated container if personal use is enabled. Do not
-mount its data directory or encryption key into the Hub container.
+Keep the public profile lightweight; run the connector in an isolated container
+if personal use is enabled. Do not mount its data directory or encryption key
+into any aggregator or client container. Platform-specific deployment is in the
+optional section below.
 
 ```sh
 npm test
 npm run test:protocol
+npm run test:smoke   # standalone stdio server + connector, no platform, offline
 npm run test:live
 npm run build:extension
 ```
@@ -203,6 +206,60 @@ No test loads personal Workday cookies or sends a registration request.
 ### Connector Docker deployment
 
 See [the container deployment guide](deploy/selfhost/README.md) for automated multi-architecture images, controlled upgrades, persistent data migration and rollback. This deploys the connector independently of MCPHub.
+
+## Optional: MCPHub integration
+
+Everything here is optional and disabled by default. The MCP server and the
+connector core never depend on it. The integration is one adapter module
+(`src/connector/adapters/mcphub.ts`) selected by configuration:
+
+| Variable | Meaning |
+| --- | --- |
+| `UBC_PLATFORM_ADAPTER` | `mcphub` enables it; `none` disables it explicitly (wins over the legacy variables). Unset with none of the variables below set: off, and `/ubc/*` return 404. |
+| `UBC_PUBLIC_ORIGIN` | Required with the adapter: HTTPS origin on which users reach the connector's `/ubc/` page. |
+| `UBC_PLATFORM_URL` | Hub base URL for API calls. Defaults to `UBC_PUBLIC_ORIGIN`. `UBC_HUB_URL` is a deprecated alias. |
+| `UBC_PLATFORM_SERVER_NAME` | Name of the Hub server entry that holds the user's credential. Default `ubc-personal`. |
+
+Server names must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`.
+
+### Upgrading
+
+- **New variables:** `UBC_PLATFORM_ADAPTER` (`mcphub` or `none`), `UBC_PLATFORM_URL`
+  (replaces `UBC_HUB_URL`, which still works) and `UBC_PLATFORM_SERVER_NAME`.
+  `UBC_PUBLIC_ORIGIN` is unchanged.
+- **Existing Hub deployments keep working.** If `UBC_PLATFORM_ADAPTER` is unset but
+  `UBC_PUBLIC_ORIGIN` is set (as before), the connector enables the mcphub
+  adapter automatically and logs a deprecation warning. Set
+  `UBC_PLATFORM_ADAPTER=mcphub` explicitly; automatic enabling will be removed later.
+  A stray `UBC_HUB_URL` without `UBC_PUBLIC_ORIGIN` is ignored with a warning, as before;
+  with neither set the connector runs without an adapter.
+- **Version:** the version now comes from `package.json` (`--version`, MCP server info,
+  `/healthz`, User-Agent). `/healthz` returns `{"ok":true,"version":"..."}`.
+- **Extension first run:** no server address is built in; the field starts empty and
+  you enter your own HTTPS address. Connections made with 0.4.x keep their stored
+  origin. A pre-0.4 connection (token without an origin) is migrated only by
+  official builds (`npm run build:extension:release`, `UBC_RELEASE=official`), which
+  embed the origin from `release/extension.json`; dev and fork builds embed nothing.
+  If it cannot be resolved the extension keeps the token under another key and shows
+  "Please reconnect"; it is removed after a new connection succeeds or on Forget.
+- **Images:** the stdio server image is published as `ghcr.io/kkazuhak/ubc-mcp` by
+  the `MCP server image` workflow. Release tags must equal `v` + the `package.json`
+  version or the workflows fail. As in the connector workflow, every `v*` tag (stable or
+  pre-release) also moves the `beta` tag; only stable tags move `latest`.
+
+### Self-service connection (alpha.2)
+
+With the optional self-service routes deployed, enter your own MCPHub HTTPS origin in the extension, grant access, and approve the connection in Hub. The extension automatically opens a temporary background registration page and syncs it every 15 minutes while the browser and Workday session remain available. Recognized course-search pages are synced while open. A manual sync button and offline JSON export remain available.
+
+The connection page calls existing Hub APIs as the signed-in user to save only
+that user's READ credential. It does not change Hub source, server configuration
+or permissions. Hub access rules still apply: each user must be allowed to access the configured Hub server (`ubc-personal` by default).
+
+The extension requests local storage and optional access to the user-selected Hub origin and UBC Workday, in addition to activeTab/scripting/downloads. It stores the UPLOAD credential
+in extension-local trusted-context storage, never browser sync storage. Pairing
+codes must be kept private. Forgetting the extension's local connection does not
+revoke the server credential; use Disconnect on the connection page to revoke all
+credentials and delete current snapshots. Historical backups have separate retention.
 
 ### Connect the extension through your MCPHub
 
@@ -215,8 +272,8 @@ for the extension itself to survive a restart.
 
 Only `/ubc/` needs to be proxied to the connector on that Hub origin, alongside
 `/v1/snapshots`; no Hub code, identity-provider setup or `/api/` route changes are
-needed. The connector verifies the current Hub session and existing `ubc-personal`
-access before issuing the upload-only credential. This is session reuse rather
+needed. The connector verifies the current Hub session and existing access to the configured
+Hub server before issuing the upload-only credential. This is session reuse rather
 than a new OAuth server. An outdated connector is reported before authorization.
 
 Credentials remain bound to their original origin when switching servers. Legacy

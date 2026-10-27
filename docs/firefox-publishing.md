@@ -21,7 +21,9 @@ persistent installation work. Mozilla signing is required. Use the Mozilla
 Developer Hub submission flow, choose self-distribution/unlisted for the private
 pilot, upload the ZIP and provide the source archive when asked. Public AMO
 listing can be chosen separately by the owner. Preserve the fixed Gecko ID
-ubc-course-capture@mcp.kazuhahub.com across releases.
+ubc-course-capture@mcp.kazuhahub.com across releases. It is an identifier only,
+not a server address; changing it would orphan existing installs and their
+stored connections. Forks may override it at build time with UBC_FIREFOX_ADDON_ID.
 
 Reviewable submission information:
 - Name: UBC Course Capture
@@ -52,3 +54,13 @@ verify it survives a browser restart. This acceptance is still outstanding.
 Official references:
 https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/
 https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/
+
+## Release build configuration
+
+Only an official release build embeds the origin used to resume pre-0.4
+connections (token stored without an origin). Build with
+`npm run build:firefox:release` (or `build:extension:release` for Chrome), which
+sets `UBC_RELEASE=official`; the origin comes from `release/extension.json`
+(`legacyHubOrigin`). Plain `npm run build:firefox` / `build:extension` and fork
+builds embed nothing. Setting `UBC_LEGACY_HUB_ORIGIN` explicitly overrides the file.
+The origin is injected at build time and is not a default in `src/`.

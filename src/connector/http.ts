@@ -2,24 +2,24 @@ import {isExtensionOrigin} from './extension-origin.js';
 import {createServer} from 'node:http';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {Store} from './store.js';
-import {selfService,type SelfServiceConfig} from './self-service.js';
+import type {PlatformAdapter} from './adapters/index.js';
+import {VERSION} from '../version.js';
 function json(res:ServerResponse,status:number,value:unknown) {
   res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));
 }
-export function connectorServer(store:Store,config?:SelfServiceConfig) {
-  const ui=config?selfService(store,config):null;
-  // Snapshot reads require bearer tokens; self-service has separate Hub session validation.
+export function connectorServer(store:Store,adapter?:PlatformAdapter|null) {
+  // Snapshot reads require bearer tokens; an optional platform adapter owns its own routes and session validation.
   const recent=new Map<string,{count:number;until:number}>();
   const server=createServer(async(req:IncomingMessage,res:ServerResponse)=>{
-    if(req.method==='OPTIONS'&&['/ubc/api/claim','/v1/snapshots'].includes(req.url??'')&&isExtensionOrigin(req.headers.origin??'')&&!req.headers.cookie){
+    if(req.method==='OPTIONS'&&['/v1/snapshots',...(adapter?.preflightPaths??[])].includes(req.url??'')&&isExtensionOrigin(req.headers.origin??'')&&!req.headers.cookie){
       res.writeHead(204,{'Access-Control-Allow-Origin':req.headers.origin!,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, Content-Type','Vary':'Origin'});res.end();return;
     }
-    if (req.url==='/healthz'&&req.method==='GET') return json(res,200,{ok:true});
-    if(ui&&req.url?.startsWith('/ubc/')) {
+    if (req.url==='/healthz'&&req.method==='GET') return json(res,200,{ok:true,version:VERSION});
+    if(adapter&&adapter.handles(req.url??'')) {
       const ip=req.socket.remoteAddress??'unknown',now=Date.now(),key=`ui:${ip}`,prev=recent.get(key);
       const state=prev&&prev.until>now?prev:{count:0,until:now+60_000};state.count++;recent.set(key,state);
       if(state.count>120)return json(res,429,{error:'RATE_LIMITED'});
-      try{await ui(req,res,(status,value)=>json(res,status,value));}catch{if(!res.headersSent)json(res,503,{error:'SERVICE_UNAVAILABLE'});else res.end();}return;
+      try{await adapter.handle(req,res,(status,value)=>json(res,status,value));}catch{if(!res.headersSent)json(res,503,{error:'SERVICE_UNAVAILABLE'});else res.end();}return;
     }
     if (req.url!=='/v1/snapshots'||!['GET','POST'].includes(req.method??'')) return json(res,404,{error:'NOT_FOUND'});
     if(req.headers.origin) {

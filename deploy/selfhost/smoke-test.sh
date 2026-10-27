@@ -16,7 +16,7 @@ trap cleanup EXIT
 docker volume create "$volume" >/dev/null
 docker run -d --name "$name" --init --read-only --tmpfs /tmp --cap-drop ALL \
   --security-opt no-new-privileges:true -v "$volume:/data" \
-  -e UBC_PUBLIC_ORIGIN=https://hub.example.test "$image" >/dev/null
+  -e UBC_PLATFORM_ADAPTER=mcphub -e UBC_PUBLIC_ORIGIN=https://hub.example.test "$image" >/dev/null
 ready() {
   for ((i=0; i<45; i++)); do
     if docker exec "$name" node -e "fetch('http://127.0.0.1:8792/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then return; fi
