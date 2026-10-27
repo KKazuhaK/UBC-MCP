@@ -64,11 +64,8 @@ if(phase==='seed') {
 store.close();
 console.log('ok: '+phase);
 JS
-docker cp "$work/check.mjs" "$name:/tmp/check.mjs"
-docker exec "$name" node /tmp/check.mjs seed
+docker exec -i "$name" node --input-type=module - seed < "$work/check.mjs"
 docker restart "$name" >/dev/null
 ready
-# /tmp is intentionally ephemeral after a restart.
-docker cp "$work/check.mjs" "$name:/tmp/check.mjs"
-docker exec "$name" node /tmp/check.mjs restored
+docker exec -i "$name" node --input-type=module - restored < "$work/check.mjs"
 echo 'PASS: non-root read-only image, access scopes, user isolation, snapshot persistence and revocation'
