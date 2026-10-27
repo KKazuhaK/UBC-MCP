@@ -15,3 +15,5 @@ extension/THIRD_PARTY_NOTICES.txt
 
 extension/background.js
 extension/hub-link.js
+
+extension-firefox/

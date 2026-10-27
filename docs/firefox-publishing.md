@@ -7,7 +7,10 @@ fixed the persistent Checking state. Direct MCPHub connection requires connector
 acceptance remains required after upgrading both components.
 
 Build from the accompanying source archive with Node 24+, npm ci and
-npm run build:firefox. The output is .data/firefox-extension, containing a root
+npm run build:firefox. The visible output is extension-firefox/ (also mirrored to .data/firefox-extension
+for packaging). In Firefox load extension-firefox/manifest.json, never the Chrome
+extension/ directory: Firefox uses background.scripts, while Chrome uses
+background.service_worker. The output contains a root
 manifest, HTML, bundled JavaScript and license notices. No environment file,
 Workday export, user credential or private database is needed for the build.
 Run npx --yes web-ext@10.8.0 lint --source-dir .data/firefox-extension
