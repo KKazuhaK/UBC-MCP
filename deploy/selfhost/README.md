@@ -6,7 +6,7 @@ or service definition needs to change.
 
 The first validated multi-architecture build is available at
 `ghcr.io/kkazuhak/ubc-connector@sha256:bcfd437b5a549c01a083770e08cda1478ec1f31a299e9773a9c8709bcee8cdd3`.
-The mutable `edge` tag currently points at this build.
+Use the digest to keep this exact build; `edge` can advance.
 
 ## Images and updates
 
