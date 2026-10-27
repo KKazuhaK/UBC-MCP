@@ -125,6 +125,15 @@ node dist/connector/cli.js revoke BINDING_ID
 Revocation disables both tokens and removes active snapshots. Revoked data may
 remain in historical backups; manage backup retention separately.
 
+## Firefox status
+
+Extension 0.2.3 prepares Firefox support and fixes startup stuck at Checking.
+For a Firefox submission build, run npm run build:firefox. See
+[signing preparation](docs/firefox-publishing.md) and
+[privacy](docs/extension-privacy.md). The ZIP is unsigned; Mozilla signing is
+still required for persistent installation. Firefox pairing/upload requires
+connector alpha.4, which has not yet been deployed from this workstation.
+
 ## Capture Workday course data
 
 ```sh

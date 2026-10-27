@@ -1,3 +1,4 @@
+import {isExtensionOrigin} from './extension-origin.js';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import type {Store} from './store.js';
 import {page,script} from './web.js';
@@ -22,7 +23,7 @@ export function selfService(store:Store,config:SelfServiceConfig) {
     if(req.method!==expected){send(405,{error:'METHOD_NOT_ALLOWED'});return;}
     if(claim) {
       // One-use random code authorizes only an upload credential, never a Hub session.
-      if(req.headers.cookie||(req.headers.origin&&!/^chrome-extension:\/\/[a-p]{32}$/.test(req.headers.origin))){send(403,{error:'EXTENSION_REQUIRED'});return;}
+      if(req.headers.cookie||(req.headers.origin&&!isExtensionOrigin(req.headers.origin))){send(403,{error:'EXTENSION_REQUIRED'});return;}
       res.setHeader('Access-Control-Allow-Origin',req.headers.origin!);res.setHeader('Vary','Origin');
       const chunks:Buffer[]=[];let n=0;
       for await(const c of req){n+=c.length;if(n>1024){send(413,{error:'TOO_LARGE'});return;}chunks.push(c);}

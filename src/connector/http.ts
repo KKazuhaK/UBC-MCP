@@ -1,3 +1,4 @@
+import {isExtensionOrigin} from './extension-origin.js';
 import {createServer} from 'node:http';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {Store} from './store.js';
@@ -10,7 +11,7 @@ export function connectorServer(store:Store,config?:SelfServiceConfig) {
   // Snapshot reads require bearer tokens; self-service has separate Hub session validation.
   const recent=new Map<string,{count:number;until:number}>();
   const server=createServer(async(req:IncomingMessage,res:ServerResponse)=>{
-    if(req.method==='OPTIONS'&&['/ubc/api/claim','/v1/snapshots'].includes(req.url??'')&&/^chrome-extension:\/\/[a-p]{32}$/.test(req.headers.origin??'')&&!req.headers.cookie){
+    if(req.method==='OPTIONS'&&['/ubc/api/claim','/v1/snapshots'].includes(req.url??'')&&isExtensionOrigin(req.headers.origin??'')&&!req.headers.cookie){
       res.writeHead(204,{'Access-Control-Allow-Origin':req.headers.origin!,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, Content-Type','Vary':'Origin'});res.end();return;
     }
     if (req.url==='/healthz'&&req.method==='GET') return json(res,200,{ok:true});
@@ -22,7 +23,7 @@ export function connectorServer(store:Store,config?:SelfServiceConfig) {
     }
     if (req.url!=='/v1/snapshots'||!['GET','POST'].includes(req.method??'')) return json(res,404,{error:'NOT_FOUND'});
     if(req.headers.origin) {
-      if(req.method!=='POST'||req.headers.cookie||!/^chrome-extension:\/\/[a-p]{32}$/.test(req.headers.origin))return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
+      if(req.method!=='POST'||req.headers.cookie||!isExtensionOrigin(req.headers.origin))return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
       res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');
     }
     const ip=req.socket.remoteAddress??'unknown',now=Date.now(),prev=recent.get(ip);

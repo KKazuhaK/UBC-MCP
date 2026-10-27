@@ -17,5 +17,7 @@ jobs:
       - run: npm test
       - run: npm run test:protocol
       - run: npm run build:extension
+      - run: npm run build:firefox
+      - run: npx --yes web-ext@10.8.0 lint --source-dir .data/firefox-extension --warnings-as-errors
       - run: npm pack --dry-run
       - run: docker build -t ubc-mcp:check .

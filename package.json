@@ -1,6 +1,6 @@
 {
   "name": "ubc-mcp",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "UBC course discovery and registration planning with isolated personal Workday snapshots",
   "type": "module",
   "private": true,
@@ -27,7 +27,8 @@
     "start": "node dist/cli.js",
     "connector": "node dist/connector/cli.js serve",
     "test:protocol": "npm run build && node scripts/protocol-check.mjs",
-    "build:extension": "node scripts/build-extension.mjs"
+    "build:extension": "node scripts/build-extension.mjs",
+    "build:firefox": "node scripts/build-firefox.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",

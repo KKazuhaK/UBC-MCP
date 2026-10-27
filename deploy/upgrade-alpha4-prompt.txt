@@ -1,0 +1,18 @@
+请将独立 UBC connector 升级至 v0.1.0-alpha.4。
+发布：https://github.com/KKazuhaK/UBC-MCP/releases/tag/v0.1.0-alpha.4
+
+本版修复 Firefox 扩展配对/上传被拒绝，并重新设计 /ubc/ 连接页面。当前线上实测：Firefox Origin 的无效码请求得到403 EXTENSION_REQUIRED，Chrome Origin 得到401 PAIRING_EXPIRED_OR_USED。升级后，两种合法扩展来源的无效码都应得到401，而不是绕过认证。
+
+不要修改或重启 MCPHub，不修改其源码、镜像、Compose、数据库、服务定义、可见性、登录或 /api/ 路由。只升级 /opt/ubc-connector/app、独立镜像及 UBC 服务。原有 Hub alpha.1 stdio 读取 API 继续兼容。
+
+1. 备份 app、构建和 Compose 配置。保留原持久化目录、encryption.key、UID、网络、环境、端口和所有隔离设置。不覆盖生产数据。
+2. 下载 release 的 ubc-mcp-0.1.0-alpha.4.tgz，按 SHA256SUMS.txt 校验。没有新增运行依赖或数据库迁移。
+3. 使用无缓存构建或刷新构建上下文 mtime，规避此前 npm tgz 固定时间导致的旧文件缓存。逐项校验镜像 dist 与新 app 的 SHA256，特别是 connector/web.js、extension-origin.js、http.js 和 self-service.js。
+4. 只重建 UBC connector，Hub 不动。沿用现有 /ubc/ 和 /v1/snapshots 的 nginx 路由，无需添加通配 CORS。保留 OPTIONS、Cookie/Origin/Authorization 转发、大小限制、无缓存和日志保护。
+5. 验收 Firefox 和 Chrome 的严格扩展 Origin：OPTIONS 为204，错误配对码为401；没有 token 的上传仍为401，网页来源和伪造来源仍被拒绝。不得添加共享凭证或放宽 Hub 可见性。
+6. 源码 npm test 预期43项通过；npm run test:protocol通过；Firefox打包 npm run build:firefox，再运行 npx --yes web-ext@10.8.0 lint --source-dir .data/firefox-extension --warnings-as-errors（零错误、零警告）。
+7. /ubc/ 应显示新的三步连接面板、状态标记、侧栏说明、折叠连接管理。配对码具有复制按钮及倒计时，过期后清空。桌面和窄屏均正常。
+8. 不使用真实账号/课表做自动验收，不读取或输出 Cookie、token、快照内容。真实Firefox配对/上传在本机随后验证。
+9. 失败时回滚 app 和镜像，不覆盖 data。报告已生效版本、镜像文件校验与验收结果。
+
+扩展0.2.3已修复Firefox启动一直Checking，并区分401过期码、403缺少Firefox服务端支持和429限流。正式Firefox包仍待Mozilla签名；不要把未签名ZIP改后缀当作可长期安装的XPI。无须改动Hub。

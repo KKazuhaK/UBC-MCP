@@ -89,3 +89,24 @@ test('connection page exposes slow-request progress, rejects duplicate clicks an
  await b.onclick();assert.equal(requests,1);const error=new Error('timeout');error.name='TimeoutError';rejectConnect(error);await task;
  assert.equal(b.disabled,false);assert.equal(b.getAttribute('aria-busy'),null);assert.equal(document.getElementById('status').dataset.state,'error');assert.match(document.getElementById('status').textContent,/连接超时/);
 });
+
+test('Firefox extension CORS still requires scoped credentials and rejects web-origin lookalikes',async t=>{
+ const {url,call}=await setup(t);await call('connect');const code=(await (await call('pair')).json()).code;
+ const origin='moz-extension://01234567-89ab-cdef-0123-456789abcdef';
+ const preflight=await fetch(url+'/ubc/api/claim',{method:'OPTIONS',headers:{Origin:origin}});assert.equal(preflight.status,204);assert.equal(preflight.headers.get('access-control-allow-origin'),origin);
+ const claimed=await fetch(url+'/ubc/api/claim',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({code})});assert.equal(claimed.status,200);const {uploadToken}=await claimed.json();
+ assert.equal((await fetch(url+'/v1/snapshots',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:'{}'})).status,401);
+ const now=new Date().toISOString();const body=JSON.stringify(snapshot({capturedAt:now,sections:[section({observedAt:now})]}));
+ assert.equal((await fetch(url+'/v1/snapshots',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',Authorization:`Bearer ${uploadToken}`},body})).status,200);
+ for(const bad of ['moz-extension://bad','moz-extension://01234567-89ab-cdef-0123-456789abcdef.evil.com','https://moz-extension.example','null'])assert.equal((await fetch(url+'/v1/snapshots',{method:'POST',headers:{Origin:bad,Authorization:`Bearer ${uploadToken}`},body})).status,403);
+});
+
+test('pairing panel copies only the current code and clears it on expiry',async()=>{
+ const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/web.js');
+ const {document}=parseHTML(page);let now=100000,tick,copied;
+ const fetch=async url=>({ok:true,json:async()=>url.endsWith('/status')?{connected:true,scopes:[]}:{code:'a'.repeat(43),expires:now+2000}});
+ runInNewContext(script,{document,fetch,AbortSignal,Date:{now:()=>now},setInterval:fn=>{tick=fn;return 1;},clearInterval:()=>{},navigator:{clipboard:{writeText:async value=>{copied=value;}}},confirm:()=>true,alert:()=>{}});await new Promise(r=>setImmediate(r));
+ await document.getElementById('pair').onclick();assert.equal(document.getElementById('copy').disabled,false);assert.match(document.getElementById('expires').textContent,/0:02/);
+ await document.getElementById('copy').onclick();assert.equal(copied,'a'.repeat(43));assert.equal(document.getElementById('copy').textContent,'已复制');
+ now+=3000;tick();assert.equal(document.getElementById('code').value,'');assert.equal(document.getElementById('copy').disabled,true);assert.match(document.getElementById('expires').textContent,/已过期/);
+});

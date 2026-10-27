@@ -9,3 +9,6 @@ private/
 extension/popup.js
 *.tgz
 *.zip
+
+extension/LICENSE.txt
+extension/THIRD_PARTY_NOTICES.txt

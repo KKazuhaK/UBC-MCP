@@ -111,3 +111,21 @@ the connector. The extension requires refreshing the existing unpacked extension
 37 local tests and protocol checks pass, including delayed-request duplicate-click
 and error-recovery tests. No real tokens, user bindings or snapshots were used
 for this UI review.
+
+## Firefox compatibility and connection redesign prepared — alpha.4
+
+Extension 0.2.3 fixes the unguarded Chrome-only startup call, uses Firefox's
+browser namespace, and restores controls after initialization failure/timeout.
+The user confirmed Firefox reload exits the stuck Checking state. The live server
+was independently probed with invalid non-secret codes: Firefox extension origin
+returned 403 EXTENSION_REQUIRED, while Chrome returned 401 PAIRING_EXPIRED_OR_USED.
+Firefox origin support is implemented and tested locally, awaiting operator
+upgrade. The error message now distinguishes this rejection from an expired code.
+
+The /ubc/ page was redesigned into a responsive three-step connection panel with
+account state, copy/expiring pairing code, sync section and separate management.
+Synthetic desktop and 390px browser previews passed (no horizontal overflow).
+43 local tests pass. Mozilla web-ext 10.8.0 reports zero errors and warnings on
+the Firefox 142+ package. This is an unsigned submission build: Mozilla login,
+agreement acceptance, signing and persistent-install acceptance remain pending.
+No Hub source/configuration or live user connection was changed by this upgrade.
