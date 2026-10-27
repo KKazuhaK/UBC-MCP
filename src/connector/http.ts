@@ -1,16 +1,30 @@
 import {createServer} from 'node:http';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {Store} from './store.js';
+import {selfService,type SelfServiceConfig} from './self-service.js';
 function json(res:ServerResponse,status:number,value:unknown) {
   res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));
 }
-export function connectorServer(store:Store) {
-  // This service accepts bearer tokens only, never browser cookies or cross-origin requests.
+export function connectorServer(store:Store,config?:SelfServiceConfig) {
+  const ui=config?selfService(store,config):null;
+  // Snapshot reads require bearer tokens; self-service has separate Hub session validation.
   const recent=new Map<string,{count:number;until:number}>();
   const server=createServer(async(req:IncomingMessage,res:ServerResponse)=>{
+    if(req.method==='OPTIONS'&&['/ubc/api/claim','/v1/snapshots'].includes(req.url??'')&&/^chrome-extension:\/\/[a-p]{32}$/.test(req.headers.origin??'')&&!req.headers.cookie){
+      res.writeHead(204,{'Access-Control-Allow-Origin':req.headers.origin!,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, Content-Type','Vary':'Origin'});res.end();return;
+    }
     if (req.url==='/healthz'&&req.method==='GET') return json(res,200,{ok:true});
+    if(ui&&req.url?.startsWith('/ubc/')) {
+      const ip=req.socket.remoteAddress??'unknown',now=Date.now(),key=`ui:${ip}`,prev=recent.get(key);
+      const state=prev&&prev.until>now?prev:{count:0,until:now+60_000};state.count++;recent.set(key,state);
+      if(state.count>120)return json(res,429,{error:'RATE_LIMITED'});
+      try{await ui(req,res,(status,value)=>json(res,status,value));}catch{if(!res.headersSent)json(res,503,{error:'SERVICE_UNAVAILABLE'});else res.end();}return;
+    }
     if (req.url!=='/v1/snapshots'||!['GET','POST'].includes(req.method??'')) return json(res,404,{error:'NOT_FOUND'});
-    if (req.headers.origin) return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
+    if(req.headers.origin) {
+      if(req.method!=='POST'||req.headers.cookie||!/^chrome-extension:\/\/[a-p]{32}$/.test(req.headers.origin))return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
+      res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');
+    }
     const ip=req.socket.remoteAddress??'unknown',now=Date.now(),prev=recent.get(ip);
     if (recent.size>10000) for (const [key,v]of recent)if(v.until<now)recent.delete(key);
     const state=prev&&prev.until>now?prev:{count:0,until:now+60_000};state.count++;recent.set(ip,state);

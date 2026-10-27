@@ -15,8 +15,10 @@ automated integration coverage. A manual course-capture extension is included.
 It captures visible search results and an open section detail dialog; a separate
 explicit action captures private registrations from View My Courses. It does not
 silently fetch the full catalog or refresh source data. An installed-browser
-registration export passed a real local connector/MCP acceptance run; a hosted
-personal connector and course-search export acceptance remain outstanding.
+registration export passed a real local connector/MCP acceptance run. The hosted
+connector passed operator-reported synthetic checks. Self-service onboarding and
+extension upload are implemented in alpha.2 but await hosted/browser acceptance;
+course-search export acceptance remains outstanding.
 
 Workday UI fields were inspected in an authenticated browser on 2026-10-26.
 This is evidence of field availability, not evidence of a public Workday API or
@@ -66,7 +68,29 @@ are stored as separate snapshot kinds; schedule checks can select either kind.
 This prevents confusing Winter Term 2
 in January 2027 with the 2027 Winter Session.
 
-## Connect a personal snapshot
+## Self-service connection (alpha.2)
+
+With the optional self-service routes deployed, open
+https://mcp.kazuhahub.com/ubc/ while signed in to Hub. Click Connect UBC, generate
+a five-minute single-use pairing code, and paste it into the extension. Preview
+the currently visible Workday course data or your registrations, then explicitly
+upload. No administrator-created binding, token copying, terminal or downloaded
+JSON is required. Offline JSON export remains available.
+
+The connection page calls existing Hub APIs as the signed-in user to save only
+that user's READ credential. It does not change Hub source, server configuration
+or permissions. Hub access rules still apply: the current private ubc-personal
+entry is available only to its owner and administrators. Other users cannot
+self-enroll until the operator separately authorizes their access in Hub.
+
+The updated extension requests local storage and access only to the fixed sync
+host, in addition to activeTab/scripting/downloads. It stores the UPLOAD credential
+in extension-local trusted-context storage, never browser sync storage. Pairing
+codes must be kept private. Forgetting the extension's local connection does not
+revoke the server credential; use Disconnect on the connection page to revoke all
+credentials and delete current snapshots. Historical backups have separate retention.
+
+## Connect a personal snapshot (local / administrative tools)
 
 For local verification, set `UBC_PROFILE=personal` and `UBC_SNAPSHOT_FILE` to an
 absolute private JSON file path. Never point a shared Hub service at an
@@ -169,7 +193,8 @@ Automatic polling is not implemented in this alpha.
 ## Deploy and validate
 
 See [Hub deployment](deploy/mcphub/README.md). Keep the public profile lightweight;
-run the connector separately if personal use is enabled.
+run the connector in an isolated container if personal use is enabled. Do not
+mount its data directory or encryption key into the Hub container.
 
 ```sh
 npm test

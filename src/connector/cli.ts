@@ -32,7 +32,7 @@ try {
       const host=process.env.UBC_CONNECTOR_HOST??'127.0.0.1';
       if(!['127.0.0.1','0.0.0.0'].includes(host))throw new Error('Invalid connector bind address');
       const port=Number(process.env.UBC_CONNECTOR_PORT??8792);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('Invalid port');
-      const server=connectorServer(store);server.listen(port,host,()=>console.error(`UBC connector listening on ${host}:${port}`));
+      const server=connectorServer(store,process.env.UBC_PUBLIC_ORIGIN?{origin:process.env.UBC_PUBLIC_ORIGIN,...(process.env.UBC_HUB_URL?{hubUrl:process.env.UBC_HUB_URL}:{})}:undefined);server.listen(port,host,()=>console.error(`UBC connector listening on ${host}:${port}`));
       for(const sig of ['SIGINT','SIGTERM']as const)process.on(sig,()=>server.close(()=>{store.close();process.exit(0);}));
     }else{store.close();throw new Error('Use serve, create-binding <label>, revoke <id>, or push <file>');}
   }

@@ -1,0 +1,22 @@
+请将已部署的 UBC connector 升级到 v0.1.0-alpha.2，自助开通与扩展上传版。
+
+严格限制：不要修改 MCPHub 源码、镜像、Compose、数据库、服务定义、可见性或登录配置；不要重启 Hub。只更新 /opt/ubc-connector 下的独立服务和对应 nginx 路由。用户通过已有 Hub API 保存自己的凭证属于正常使用，不需要管理员密钥。
+
+发布地址：https://github.com/KKazuhaK/UBC-MCP/releases/tag/v0.1.0-alpha.2
+使用 release 的 ubc-mcp-0.1.0-alpha.2.tgz 与 SHA256SUMS.txt 校验，不覆盖旧 release。源码 tag 同名。先读取包内 deploy/mcphub/README.md 的 Self-service GUI upgrade 段落。
+
+按顺序执行：
+1. 检查现有独立容器，备份 app、构建配置、nginx 配置及完整持久化目录。SQLite 使用一致性备份或停 connector 后复制，连同 encryption.key 保存；不要输出任何密钥或真实快照。
+2. 将新版编译包部署到 connector 的 app 目录，不改变现有数据目录、UID、隔离设置、网络或 8792 的宿主机 loopback 绑定。本版没有新增运行依赖。
+3. 给 connector 增加 UBC_PUBLIC_ORIGIN=https://mcp.kazuhahub.com。UBC_HUB_URL 默认同一 HTTPS 地址，优先保持默认，让既有登录网关正常参与。不能关闭登录校验，不能用管理员 token 或客户端自报用户名替代认证。
+4. 新增 nginx /ubc/ 路由指向 connector（参考包内 deploy/ubc-self-service.nginx.conf.example），保留 Cookie、Origin、Authorization，禁用缓存与访问日志。不要修改现有 Hub /api/ 路由。
+5. 原 /v1/snapshots 路由允许 OPTIONS、GET、POST，不新增 nginx 通配 CORS；由 connector 校验扩展请求。维持 4MB 限制、无缓存及日志保护，/healthz 不对公网开放。
+6. 仅重建 UBC connector；nginx -t 后 reload。Hub 保持运行。
+7. 检查 GUI /ubc/ 和脚本 /ubc/app.js 可访问，未登录 API 拒绝；伪造用户名头、系统 bearer、跨站 Origin 不可创建账户。不可把网关登录 HTML 当成成功的 JSON。
+8. 使用虚构快照运行源码 npm test、npm run test:protocol、npm run build:extension；当前预期 35 项测试通过。保留现有匿名拒绝、作用域、隔离、撤销、时间戳和重建持久化验收。
+9. 真实浏览器登录、扩展配对和上传由本机完成，不能伪造会话。当前 ubc-personal 私有可见性意味着普通用户未获授权时必须失败，不得为了测试扩大访问。报告这一限制，不要修改 Hub。
+10. 报告更新版本、路由、健康状态、已验证与尚未验证项、回滚步骤，不输出 Cookie/token/真实课表。
+
+本机随后使用 extension 0.2.0：用户在 /ubc/ 点击连接，服务验证当前 Hub 用户且检查该用户有 ubc-personal 访问权，通过既有个人凭证 API 写入 READ token；生成 5 分钟一次性码，扩展仅获得 UPLOAD token。扩展先预览，再显式上传。网页可以撤销并删除当前快照。无需管理员逐个创建 binding，也不要求用户复制永久 token 或运行 CLI。
+
+若既有登录网关不向 /ubc/ 提供有效登录会话，请记录具体认证失败点，不要改 Hub 或绕过登录。备份必须保留新建 binding 的数据与密钥；回滚应用和路由不应清空数据。新版数据库只新增表，旧版可继续读取原 snapshots/bindings。

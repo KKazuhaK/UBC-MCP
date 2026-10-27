@@ -20,6 +20,8 @@ export class Store {
     this.db.exec(`PRAGMA journal_mode=WAL;
       PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS bindings(id TEXT PRIMARY KEY,label TEXT NOT NULL,read_hash TEXT UNIQUE NOT NULL,upload_hash TEXT UNIQUE NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS accounts(username TEXT PRIMARY KEY,binding_id TEXT NOT NULL REFERENCES bindings(id),credentials TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS pairing(code_hash TEXT PRIMARY KEY,binding_id TEXT NOT NULL REFERENCES bindings(id),expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS snapshots(binding_id TEXT NOT NULL REFERENCES bindings(id),scope TEXT NOT NULL,captured_at TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(binding_id,scope));`);
   }
   create(label:string) {
@@ -39,6 +41,8 @@ export class Store {
     try {
       this.db.prepare('UPDATE bindings SET revoked=1 WHERE id=?').run(id);
       this.db.prepare('DELETE FROM snapshots WHERE binding_id=?').run(id);
+      this.db.prepare('DELETE FROM pairing WHERE binding_id=?').run(id);
+      this.db.prepare('DELETE FROM accounts WHERE binding_id=?').run(id);
       this.db.exec('COMMIT');
     } catch(e) {this.db.exec('ROLLBACK');throw e;}
   }
@@ -64,6 +68,41 @@ export class Store {
       decipher.setAAD(Buffer.from(`${id}:${String(row.scope)}`));decipher.setAuthTag(bytes.subarray(12,28));
       return parseSnapshot(JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString('utf8')));
     });
+  }
+  private seal(text:string,aad:string) {
+    const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',this.key,iv);c.setAAD(Buffer.from(aad));
+    const body=Buffer.concat([c.update(text,'utf8'),c.final()]);
+    return Buffer.concat([iv,c.getAuthTag(),body]).toString('base64');
+  }
+  private unseal(body:string,aad:string) {
+    const b=Buffer.from(body,'base64'),d=createDecipheriv('aes-256-gcm',this.key,b.subarray(0,12));
+    d.setAAD(Buffer.from(aad));d.setAuthTag(b.subarray(12,28));
+    return Buffer.concat([d.update(b.subarray(28)),d.final()]).toString('utf8');
+  }
+  account(username:string,create=false):{id:string;readToken:string;uploadToken:string}|null {
+    const row=this.db.prepare('SELECT a.binding_id,a.credentials FROM accounts a JOIN bindings b ON b.id=a.binding_id WHERE a.username=? AND b.revoked=0').get(username);
+    if(row)return JSON.parse(this.unseal(String(row.credentials),`account:${username}:${row.binding_id}`));
+    if(!create)return null;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const binding=this.create('Self-service UBC connection');
+      this.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(username) DO UPDATE SET binding_id=excluded.binding_id,credentials=excluded.credentials').run(username,binding.id,this.seal(JSON.stringify(binding),`account:${username}:${binding.id}`));
+      this.db.exec('COMMIT');return binding;
+    }catch(e){this.db.exec('ROLLBACK');throw e;}
+  }
+  pair(username:string) {
+    const a=this.account(username);if(!a)throw new Error('Not connected');
+    const code=randomBytes(32).toString('base64url'),expires=Date.now()+5*60_000;
+    this.db.prepare('DELETE FROM pairing WHERE binding_id=? OR expires<?').run(a.id,Date.now());
+    this.db.prepare('INSERT INTO pairing VALUES(?,?,?)').run(digest(code),a.id,expires);
+    return {code,expires};
+  }
+  claim(code:string) {
+    if(!/^[\w-]{43}$/.test(code))return null;
+    const row=this.db.prepare('SELECT p.binding_id,a.username FROM pairing p JOIN accounts a ON a.binding_id=p.binding_id JOIN bindings b ON b.id=p.binding_id WHERE p.code_hash=? AND p.expires>? AND b.revoked=0').get(digest(code),Date.now());
+    if(!row)return null;
+    this.db.prepare('DELETE FROM pairing WHERE code_hash=?').run(digest(code));
+    return {uploadToken:this.account(String(row.username))!.uploadToken};
   }
   close(){this.db.close();}
 }

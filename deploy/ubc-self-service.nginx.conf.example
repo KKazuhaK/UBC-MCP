@@ -1,0 +1,17 @@
+# Add inside the existing HTTPS server block. Leave Hub routes unchanged.
+location ^~ /ubc/ {
+    proxy_pass http://127.0.0.1:8792;
+    proxy_set_header Host $host;
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header Origin $http_origin;
+    proxy_set_header Authorization $http_authorization;
+    proxy_cache off;
+    proxy_no_cache 1;
+    proxy_cache_bypass 1;
+    client_max_body_size 4m;
+    access_log off;
+    add_header Cache-Control "no-store" always;
+}
+# In the EXISTING exact /v1/snapshots location, permit OPTIONS in addition
+# to GET and POST. Keep its proxy target, no-cache and logging protections.
+# The connector answers extension preflight; do not add wildcard CORS here.

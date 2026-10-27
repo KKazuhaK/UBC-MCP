@@ -1,0 +1,12 @@
+export const page=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>连接 UBC</title>
+<style>body{font:16px system-ui;max-width:680px;margin:60px auto;padding:20px;color:#17324d}button,a{margin:8px 8px 8px 0}button{padding:12px;border:0;border-radius:8px;background:#003b65;color:white}pre{white-space:pre-wrap;overflow-wrap:anywhere}textarea{width:100%;min-height:70px}small{display:block;line-height:1.6}</style>
+<h1>连接你的 UBC</h1><p>使用当前 Hub 登录账号。Workday 密码和 Cookie 始终留在你的浏览器。</p><a href="/">登录 / 返回 Hub</a>
+<p id="status" role="status">正在检查连接…</p><button id="connect">连接 UBC / 修复绑定</button><button id="pair">生成扩展配对码</button><button id="refresh">刷新状态</button><button id="disconnect">断开并删除我的数据</button>
+<section id="pairing" hidden><h2>配对扩展</h2><p>复制下面的配对码，粘贴到 UBC Course Capture 扩展。5 分钟内有效且只能使用一次，不要分享。</p><textarea id="code" readonly></textarea></section>
+<h2>最近同步</h2><pre id="scopes">尚无数据</pre><small>扩展内先预览课程，再点击上传。同步后可以关闭 Chrome。服务器保存的是快照，不能自动刷新 Workday，也不会代你选课。断开会撤销所有读写凭证并删除当前快照；历史备份按服务器保留策略处理。</small>
+<script src="/ubc/app.js" defer></script></html>`;
+export const script=`const $=id=>document.getElementById(id);let busy=false;
+async function api(action){const r=await fetch('/ubc/api/'+action,{method:action==='status'?'GET':'POST',credentials:'same-origin',redirect:'error',headers:action==='status'?{}:{'Content-Type':'application/json'},...(action==='status'?{}:{body:'{}'})});const x=await r.json();if(!r.ok)throw new Error(x.message||x.error);return x;}
+async function status(){const x=await api('status');$('status').textContent=x.connected?'已连接。可以配对扩展并同步。':'尚未连接。请点击连接 UBC。';$('scopes').textContent=x.scopes.length?x.scopes.map(s=>s.campus+' · '+s.period+' · '+s.kind+' · '+s.sections+' 班次 · '+s.capturedAt).join('\\n'):'尚无同步数据';}
+for(const action of ['connect','pair','refresh','disconnect'])$(action).onclick=async()=>{if(busy)return;if(action==='disconnect'&&!confirm('断开 UBC 并删除服务器保存的当前快照？扩展凭证也将失效。'))return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);try{if(action==='pair'){const p=await api('pair');$('code').value=p.code;$('pairing').hidden=false;$('status').textContent='配对码已生成，5 分钟内有效。';}else{if(action!=='refresh'){const result=await api(action);if(result.warning)alert(result.warning);$('pairing').hidden=true;$('code').value='';}await status();}}catch(e){$('status').textContent=e.message;}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);}};
+status().catch(e=>$('status').textContent=e.message);`;
