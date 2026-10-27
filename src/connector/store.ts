@@ -5,6 +5,7 @@ import {createHash,randomBytes,createCipheriv,createDecipheriv} from 'node:crypt
 import {parseSnapshot} from '../model.js';
 import type {Snapshot} from '../model.js';
 
+export const normalizeIssuer=(s:string)=>s.endsWith('/')?s.slice(0,-1):s;
 const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
 export class Store {
   private db:DatabaseSync; private key:Buffer;
@@ -20,9 +21,19 @@ export class Store {
     this.db.exec(`PRAGMA journal_mode=WAL;
       PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS bindings(id TEXT PRIMARY KEY,label TEXT NOT NULL,read_hash TEXT UNIQUE NOT NULL,upload_hash TEXT UNIQUE NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE IF NOT EXISTS accounts(username TEXT PRIMARY KEY,binding_id TEXT NOT NULL REFERENCES bindings(id),credentials TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS accounts(username TEXT NOT NULL,issuer_key TEXT NOT NULL DEFAULT '',issuer TEXT,binding_id TEXT NOT NULL REFERENCES bindings(id),credentials TEXT NOT NULL,PRIMARY KEY(username,issuer_key));
       CREATE TABLE IF NOT EXISTS pairing(code_hash TEXT PRIMARY KEY,binding_id TEXT NOT NULL REFERENCES bindings(id),expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS snapshots(binding_id TEXT NOT NULL REFERENCES bindings(id),scope TEXT NOT NULL,captured_at TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(binding_id,scope));`);
+    // Databases from before issuer-bound accounts keyed accounts by username alone.
+    if(!this.db.prepare('PRAGMA table_info(accounts)').all().some(c=>c.name==='issuer_key')) {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        this.db.exec(`CREATE TABLE accounts_new(username TEXT NOT NULL,issuer_key TEXT NOT NULL DEFAULT '',issuer TEXT,binding_id TEXT NOT NULL REFERENCES bindings(id),credentials TEXT NOT NULL,PRIMARY KEY(username,issuer_key));
+          INSERT INTO accounts_new(username,issuer_key,issuer,binding_id,credentials) SELECT username,'',NULL,binding_id,credentials FROM accounts;
+          DROP TABLE accounts; ALTER TABLE accounts_new RENAME TO accounts;`);
+        this.db.exec('COMMIT');
+      }catch(e){this.db.exec('ROLLBACK');throw e;}
+    }
   }
   create(label:string) {
     if (!label.trim()||label.length>100) throw new Error('Binding label is required (1-100 characters)');
@@ -79,16 +90,49 @@ export class Store {
     d.setAAD(Buffer.from(aad));d.setAuthTag(b.subarray(12,28));
     return Buffer.concat([d.update(b.subarray(28)),d.final()]).toString('utf8');
   }
+  /**
+   * Platform accounts (created by the platform adapters) live in the issuer-less
+   * namespace keyed by username. A platform account may carry the issuer
+   * recorded when it was created or reconnected through OAuth (null: legacy).
+   */
   account(username:string,create=false):{id:string;readToken:string;uploadToken:string}|null {
-    const row=this.db.prepare('SELECT a.binding_id,a.credentials FROM accounts a JOIN bindings b ON b.id=a.binding_id WHERE a.username=? AND b.revoked=0').get(username);
+    return this.accountIn(username,'',create,null);
+  }
+  /** An account created for one issuer+sub pair (standalone use; see link-account). */
+  linkedAccount(issuer:string,sub:string,create=false):{id:string;readToken:string;uploadToken:string}|null {
+    const key=normalizeIssuer(issuer);return this.accountIn(sub,key,create,key);
+  }
+  private accountIn(username:string,key:string,create:boolean,issuer:string|null) {
+    const row=this.db.prepare('SELECT a.binding_id,a.credentials FROM accounts a JOIN bindings b ON b.id=a.binding_id WHERE a.username=? AND a.issuer_key=? AND b.revoked=0').get(username,key);
     if(row)return JSON.parse(this.unseal(String(row.credentials),`account:${username}:${row.binding_id}`));
     if(!create)return null;
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const binding=this.create('Self-service UBC connection');
-      this.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(username) DO UPDATE SET binding_id=excluded.binding_id,credentials=excluded.credentials').run(username,binding.id,this.seal(JSON.stringify(binding),`account:${username}:${binding.id}`));
+      const binding=this.create(key?'Linked UBC connection':'Self-service UBC connection');
+      this.db.prepare('INSERT INTO accounts(username,issuer_key,issuer,binding_id,credentials) VALUES(?,?,?,?,?) ON CONFLICT(username,issuer_key) DO UPDATE SET issuer=excluded.issuer,binding_id=excluded.binding_id,credentials=excluded.credentials')
+        .run(username,key,issuer,binding.id,this.seal(JSON.stringify(binding),`account:${username}:${binding.id}`));
       this.db.exec('COMMIT');return binding;
     }catch(e){this.db.exec('ROLLBACK');throw e;}
+  }
+  /** Records which issuer a platform account was created or reconnected through. */
+  recordIssuer(username:string,issuer:string) {
+    this.db.prepare("UPDATE accounts SET issuer=? WHERE username=? AND issuer_key=''").run(normalizeIssuer(issuer),username);
+  }
+  /**
+   * Account for a token's verified issuer and subject. `issuer`: tied to this
+   * issuer (linked, or a platform account that recorded it). `legacy`: a
+   * platform account with no recorded issuer; the caller must decide whether
+   * the issuer is the platform's own authority before using it.
+   */
+  accountForIssuer(iss:string,sub:string):{account:{id:string;readToken:string;uploadToken:string};via:'issuer'|'legacy'}|null {
+    const issuer=normalizeIssuer(iss),linked=this.accountIn(sub,issuer,false,issuer);
+    if(linked)return {account:linked,via:'issuer'};
+    const row=this.db.prepare("SELECT issuer FROM accounts WHERE username=? AND issuer_key=''").get(sub);
+    if(!row)return null;
+    const recorded=row.issuer===null||row.issuer===undefined?null:String(row.issuer);
+    if(recorded!==null&&recorded!==issuer)return null;
+    const account=this.accountIn(sub,'',false,null);
+    return account?{account,via:recorded===null?'legacy':'issuer'}:null;
   }
   pair(username:string) {
     const a=this.account(username);if(!a)throw new Error('Not connected');

@@ -1,5 +1,6 @@
 import {McpServer} from '@modelcontextprotocol/server';
 import {Tools} from './tools.js';
+import type {PersonalSource,PublicProviders} from './tools.js';
 import {Personal} from './providers/personal.js';
 import {SourceError} from './http.js';
 import {VERSION} from './version.js';
@@ -10,7 +11,11 @@ export function createServer(env=process.env) {
   const personal=new Personal(profile==='personal'?{
     file:env.UBC_SNAPSHOT_FILE,url:env.UBC_CONNECTOR_URL,token:env.UBC_CONNECTOR_TOKEN}:{});
   if (profile==='personal'&&!personal.configured()) throw new Error('Personal profile requires its own snapshot file or connector URL/token; shared fallback is forbidden');
-  const server=new McpServer({name:'ubc-mcp',version:VERSION}), tools=new Tools(personal);
+  return buildServer(new Tools(personal));
+}
+/** Registers every tool the given Tools instance offers on a fresh McpServer. */
+export function buildServer(tools:Tools) {
+  const server=new McpServer({name:'ubc-mcp',version:VERSION});
   for (const def of tools.definitions()) server.registerTool(def.name,{
     description:def.description,inputSchema:def.schema,
     annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
@@ -25,4 +30,8 @@ export function createServer(env=process.env) {
     }
   });
   return {server,tools};
+}
+/** A server bound to exactly one personal source (one account); used per request by the remote endpoint. */
+export function createServerFor(personal:PersonalSource,shared?:PublicProviders) {
+  return buildServer(new Tools(personal,shared));
 }

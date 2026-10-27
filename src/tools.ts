@@ -3,17 +3,25 @@ import {Campus,Subject,CourseNumber,YearSession,availability,freshness} from './
 import {PublicHttp,SourceError} from './http.js';
 import {Catalog} from './providers/catalog.js';
 import {Grades} from './providers/grades.js';
-import {Personal} from './providers/personal.js';
+import type {Snapshot} from './model.js';
 import {checkSchedule} from './schedule.js';
 
 const campus=Campus.default('UBCV');
 const courseFields={campus,subject:Subject,course:CourseNumber};
 const periodFields={campus,academicPeriod:z.string().min(1).max(160).describe('Exact academicPeriod.id returned by get_data_status')};
+/** The only thing the tools need from a personal data source: whether it exists and the owner's snapshots. */
+export type PersonalSource={configured():boolean;snapshots():Promise<Snapshot[]>};
+/** Public-data providers hold no user data, so one set may be shared by every request. */
+export type PublicProviders={http:PublicHttp;catalog:Catalog;grades:Grades};
 export class Tools {
-  readonly http=new PublicHttp();
-  readonly catalog=new Catalog(this.http);
-  readonly grades=new Grades(this.http);
-  constructor(readonly personal:Personal) {}
+  readonly http:PublicHttp;
+  readonly catalog:Catalog;
+  readonly grades:Grades;
+  constructor(readonly personal:PersonalSource,shared?:PublicProviders) {
+    this.http=shared?.http??new PublicHttp();
+    this.catalog=shared?.catalog??new Catalog(this.http);
+    this.grades=shared?.grades??new Grades(this.http);
+  }
   private async period(campus:Campus,id:string,kind:'sections'|'registrations'='sections') {
     const all=await this.personal.snapshots();
     const s=all.find(s=>s.campus===campus&&s.academicPeriod.id===id&&s.kind===kind);

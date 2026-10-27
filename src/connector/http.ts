@@ -3,11 +3,12 @@ import {createServer} from 'node:http';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {Store} from './store.js';
 import type {PlatformAdapter} from './adapters/index.js';
+import type {McpResource} from './mcp-http.js';
 import {VERSION} from '../version.js';
 function json(res:ServerResponse,status:number,value:unknown) {
   res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));
 }
-export function connectorServer(store:Store,adapter?:PlatformAdapter|null) {
+export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:McpResource|null) {
   // Snapshot reads require bearer tokens; an optional platform adapter owns its own routes and session validation.
   const recent=new Map<string,{count:number;until:number}>();
   const server=createServer(async(req:IncomingMessage,res:ServerResponse)=>{
@@ -15,6 +16,8 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null) {
       res.writeHead(204,{'Access-Control-Allow-Origin':req.headers.origin!,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, Content-Type','Vary':'Origin'});res.end();return;
     }
     if (req.url==='/healthz'&&req.method==='GET') return json(res,200,{ok:true,version:VERSION});
+    // The OAuth-protected MCP endpoint owns /mcp and the protected-resource metadata; it never sets CORS headers.
+    if(mcp&&mcp.handles(req.url??''))return mcp.handle(req,res);
     if(adapter&&adapter.handles(req.url??'')) {
       const ip=req.socket.remoteAddress??'unknown',now=Date.now(),key=`ui:${ip}`,prev=recent.get(key);
       const state=prev&&prev.until>now?prev:{count:0,until:now+60_000};state.count++;recent.set(key,state);

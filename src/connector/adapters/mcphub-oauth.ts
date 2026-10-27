@@ -8,7 +8,7 @@ import {handleClaim,PAGE_HEADERS,SERVER_NAME} from './shared.js';
 export type McphubOAuthConfig={origin:string;platformUrl:string;clientId:string;clientSecret?:string;sessionSecret:string;serverName?:string;warn?:(message:string)=>void;log?:(message:string)=>void};
 type Send=(status:number,value:unknown)=>void;
 type Intent='connect'|'disconnect';
-type Discovery={authorize:URL;token:URL;userinfo:URL;basicAuth:boolean};
+type Discovery={issuer:string|null;authorize:URL;token:URL;userinfo:URL;basicAuth:boolean};
 type Tx={s:string;v:string;i:Intent;e:number;x?:string;u?:string};
 type Session={u:string;b:string;e:number;c:string};
 
@@ -102,7 +102,7 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
       const secure=authorize.protocol==='https:'||(authorize.protocol==='http:'&&(LOOPBACK.includes(authorize.hostname)||authorize.origin===hub.origin));
       if(authorize.username||authorize.password||authorize.hash||!secure)throw new Error('bad');
       const methods:unknown=d?.token_endpoint_auth_methods_supported;
-      const doc={authorize,token:rebase(url(d?.token_endpoint)),userinfo:rebase(url(d?.userinfo_endpoint)),basicAuth:Array.isArray(methods)&&methods.includes('client_secret_basic')&&!methods.includes('client_secret_post')};
+      const doc={issuer:typeof d?.issuer==='string'?d.issuer:null,authorize,token:rebase(url(d?.token_endpoint)),userinfo:rebase(url(d?.userinfo_endpoint)),basicAuth:Array.isArray(methods)&&methods.includes('client_secret_basic')&&!methods.includes('client_secret_post')};
       discovered={at:Date.now(),doc};return doc;
     }catch{fail('discovery');throw new FlowError('UPSTREAM');}
   }
@@ -204,6 +204,7 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
       const existing=store.account(username),account=existing??store.account(username,true)!;
       try{await credential(token,'PUT',{'env.UBC_CONNECTOR_TOKEN':account.readToken});}
       catch{fail('credential save');if(!existing)store.revoke(account.id);throw new FlowError('SAVE');}
+      if(d.issuer)store.recordIssuer(username,d.issuer);
       const s:Session={u:username,b:account.id,e:Date.now()+SESSION_TTL,c:b64(randomBytes(32))};
       const ext=typeof tx.x==='string'&&/^[a-f0-9]{64}$/.test(tx.x)?`#extension-auth=${tx.x}`:'';
       redirect(res,`/ubc/?connected=1${ext}`,[...cookies,setCookie(SESSION_COOKIE,sign(SESSION_COOKIE,s),SESSION_TTL/1000)]);
