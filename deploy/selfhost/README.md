@@ -4,6 +4,10 @@ This deploys the UBC private connector only. Public/personal MCP stdio servers
 inside MCPHub remain independent. No Hub image, source, database, login setting
 or service definition needs to change.
 
+The first validated multi-architecture build is available at
+`ghcr.io/kkazuhak/ubc-connector@sha256:bcfd437b5a549c01a083770e08cda1478ec1f31a299e9773a9c8709bcee8cdd3`.
+The mutable `edge` tag currently points at this build.
+
 ## Images and updates
 
 GitHub Actions builds native Linux amd64 and arm64 images, tests each hardened

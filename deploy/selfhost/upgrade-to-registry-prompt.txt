@@ -1,0 +1,26 @@
+请把现有独立 UBC connector 迁移到已验收的 GHCR 镜像部署，保持 MCPHub 全程不变。
+
+固定目标镜像：
+ghcr.io/kkazuhak/ubc-connector@sha256:bcfd437b5a549c01a083770e08cda1478ec1f31a299e9773a9c8709bcee8cdd3
+对应源码：59dc3f5（Docker 自动化及只读容器验收修复）。
+构建已在原生 Linux amd64、arm64 上通过：
+https://github.com/KKazuhaK/UBC-MCP/actions/runs/40465778159
+镜像已验证允许匿名拉取。该镜像的应用仍为 v0.1.0-alpha.4，没有悄悄启用自动采集或改变配对行为。
+
+范围：
+- 仅操作 /opt/ubc-connector 下的独立 connector 部署及它自己的容器。
+- 不修改、重启、重建 MCPHub；不修改它的源码、镜像、Compose、数据库、服务定义、可见性或登录配置。
+- 保留原有 /ubc/、/v1/snapshots 反向代理。此次不需要增加 /api/ 路由，不需要新域名，不部署 Canvas 尚未发布的登录功能。
+- 不上传真实课表、读取用户 token 到日志，也不要在汇报中打印 Cookie、配对码、凭证或密钥。
+
+按顺序完成：
+1. 先检查当前 Compose、容器 inspect、挂载、环境、网络和别名。确认真正运行的 UBC_DATA_DIR 与宿主机挂载路径；不要假设数据一定在 /data/connector。若数据库在 /data 根目录，必须保留 /data。记录旧镜像 digest。
+2. 验证现有 data 目录内数据库和 encryption.key 成对存在。镜像可先拉取，停机前完成准备。只停 connector 后，备份整个 data 目录、原 Compose/env、inspect 与镜像 digest；备份权限 700，在备份副本上验证 SQLite integrity_check。不要把运行中的 SQLite 单独拷贝为备份。
+3. 优先最小修改现有 Compose：将 connector 的 image 改为固定目标，移除 connector 的 build 配置。完整保留实际 data 挂载、UBC_DATA_DIR、UBC_PUBLIC_ORIGIN、UBC_HUB_URL（若有）、网络和服务别名。保留 UID/GID 10792、只读根文件系统、cap_drop ALL、no-new-privileges、init、loopback 8792、健康检查及重启策略。不要使用 docker compose down，更不能删除卷或初始化新数据库。
+4. docker compose config -q，通过后只重建 connector 服务。新镜像 ENTRYPOINT 是 node dist/connector/cli.js，默认命令 serve；检查旧 command/entrypoint 是否需要删除，避免重复拼接。检查 healthz、UI、日志和重启状态；/healthz 仍不得公开。
+5. 用一次性虚构 binding 验证上传、读取、READ/UPLOAD 不能互用、A/B 隔离、原采集时间、撤销、重启持久化；用完撤销测试 binding。不要删除已有用户绑定或快照。确认原有服务仍正常，原用户绑定数量与升级前一致、encryption.key 没变。
+6. 更新 connector 自己的 README，记录镜像 digest、实际数据路径、只更新 connector 的命令与回滚方法。默认建议固定 digest；若运营者以后选择 beta/edge 跟随标签，也应先 pull，再有意识地 up -d，不安装无人值守更新器。
+
+回滚：仅将 connector image 改回记录的旧 digest，并保持同一个 data 挂载和密钥，重建 connector。若必须回退数据，数据库与密钥一起恢复停机备份。不要让回滚触及 Hub。
+
+如果发现当前安装路径、版本或数据库结构与上述假设不一致，保留现状并明确汇报差异；不要通过创建空目录或共享 token 绕过问题。最终汇报实际通过/未通过的检查、停机时间和回滚点，不包含任何秘密。
