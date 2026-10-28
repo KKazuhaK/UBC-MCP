@@ -1,0 +1,65 @@
+name: Release assets
+
+# Builds the npm package that MCPHub installs as a stdio server (the release
+# .tgz) and attaches it, with SHA256SUMS.txt, to the GitHub release of the tag.
+# Release notes stay hand-written: a missing release is created as a draft.
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to (re)build assets for, e.g. v0.1.0-alpha.7
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-assets-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build and attach the package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Release tag must match package.json
+        run: |
+          set -euo pipefail
+          v="$(node -p "require('./package.json').version")"
+          [ "$TAG" = "v$v" ] || { echo "tag $TAG does not equal v$v from package.json" >&2; exit 1; }
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm test
+      - name: Pack and checksum
+        run: |
+          set -euo pipefail
+          mkdir -p .release
+          npm pack --pack-destination .release
+          cd .release
+          sha256sum -- *.tgz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --prerelease \
+              --title "$TAG" --notes "Release notes to be written."
+          fi
+          gh release upload "$TAG" .release/*.tgz .release/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
