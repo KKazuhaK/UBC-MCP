@@ -207,6 +207,94 @@ No test loads personal Workday cookies or sends a registration request.
 
 See [the container deployment guide](deploy/selfhost/README.md) for automated multi-architecture images, controlled upgrades, persistent data migration and rollback. This deploys the connector independently of MCPHub.
 
+## Remote MCP endpoint (OAuth)
+
+The connector can serve the public and personal tools over Streamable HTTP at
+`/mcp` as a standard OAuth-protected MCP resource (MCP authorization
+specification, RFC 9728 protected resource metadata). It is **off by default**
+and independent of any platform: it only validates bearer JWT access tokens
+from one issuer and maps the token's `sub` to the connector account of the same
+username (the same keying the platform adapters use). The stdio server and the
+READ-token snapshot API are unchanged.
+
+| Variable | Meaning |
+| --- | --- |
+| `UBC_MCP_HTTP` | `on` enables the endpoint; unset, empty or `off` disables it. Any other value is a startup error. |
+| `UBC_PUBLIC_ORIGIN` | Required. Origin the connector is reached on: `https://...` (plain `http://` only for `localhost`, `127.0.0.1`, `[::1]`), no path. |
+| `UBC_OAUTH_ISSUER` | Required. Issuer URL of the authorization server (https, or http on loopback). Must equal the tokens' `iss` exactly. |
+| `UBC_MCP_RESOURCE` | Optional resource identifier. Default `${UBC_PUBLIC_ORIGIN}/mcp`. Set it when a reverse proxy changes the public URL. The endpoint itself is always served at `/mcp`. |
+| `UBC_OAUTH_AUDIENCE` | Optional required `aud`. Default: the resource identifier. |
+| `UBC_OAUTH_REQUIRE_AT_JWT` | Default `true`: the token header must carry `typ: at+jwt` (RFC 9068). Set `false` for issuers that sign access tokens with `typ: JWT` or no `typ`, for example some Keycloak and Okta configurations. `iss`, `aud`, `exp`, `sub` and `alg` stay strictly enforced. |
+| `UBC_TRUST_PROXY` | Default off (X-Forwarded-For is ignored). A hop count such as `1` takes the client address from the entry that many places from the right of X-Forwarded-For, i.e. the first address not added by your own proxies. Set it behind a reverse proxy, otherwise every client shares the proxy's address in the rate limits. |
+
+Endpoints:
+
+- `POST|GET|DELETE /mcp`: Streamable HTTP (stateless; one fresh server per request). 
+- `GET /.well-known/oauth-protected-resource` (also served at `/.well-known/oauth-protected-resource/mcp`):
+  `{"resource": ..., "authorization_servers": [issuer], "bearer_methods_supported": ["header"], "scopes_supported": []}`.
+
+Token validation (any standard authorization server issuing RFC 9068 JWT access tokens works):
+
+- The issuer's metadata is read from `${issuer}/.well-known/oauth-authorization-server`, falling back to
+  `/.well-known/openid-configuration`. Its `issuer` must match, and `jwks_uri` must be https (or loopback http).
+  The key set is cached and refetched when a token names an unknown `kid` (at most every 30 seconds).
+- Header `typ` must be `at+jwt`; `alg` must be `ES256` or `RS256` (`none`, `HS*` and everything else are rejected before any key is fetched).
+- `iss` must equal `UBC_OAUTH_ISSUER`, `aud` (a string, or an array containing it) must equal the audience exactly,
+  `exp` and a non-empty `sub` are required, and 60 seconds of clock skew are tolerated. `scope` is optional and not required.
+- No token: `401` with `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource"`.
+  A presented but invalid token: the same with `error="invalid_token"` added. If the issuer cannot be reached the answer is `503`
+  (never an implicit allow). Tokens are never logged, stored or forwarded.
+- Requests carrying an `Origin` header are refused and no CORS headers are ever sent; bodies are limited to 1 MB.
+  Browser-based MCP clients, which always send `Origin`, are therefore refused by design (DNS-rebinding protection);
+  use a server-side or native MCP client.
+- Rate limits: requests with a valid token are limited only per issuer+subject (600 per minute) and are never blocked by their
+  address. Requests that fail authentication are throttled per client address: invalid tokens at 120 per minute, missing or
+  expired tokens (discovery probes, refresh) at a more generous 600 per minute.
+- With `UBC_TRUST_PROXY` set, the connector must not be reachable directly: bind it to localhost or a private network that only
+  your proxy can reach (`UBC_CONNECTOR_HOST`), because `X-Forwarded-For` can otherwise be forged to evade or abuse the address limits.
+- Issuer comparison ignores a single trailing slash on both the configured issuer and the token's `iss`.
+- If the key set cannot be fetched, is not JSON or is not a valid JWKS, the answer is `503` (issuer misconfigured or down), not `401`,
+  and a one-line reason is logged. Rejected tokens log only a category (`iss`, `aud`, `exp`, `typ`, `alg`, `kid`, ...), at most once a minute each.
+
+**Accounts are bound to the issuer.** A token only reaches the account created for the same issuer and `sub`; the same
+username at a different authority reads nothing. Accounts created by the platform adapters before this existed have no
+issuer ("legacy"). They are matched only if the configured `UBC_OAUTH_ISSUER` is the platform's own authority: the connector
+reads the `issuer` from the platform's metadata (`UBC_PLATFORM_URL`) and compares. Otherwise they are never matched and one warning is
+logged. `mcphub-oauth` records the platform's issuer on an account whenever it creates or reconnects it, which removes the need for that check.
+
+An authenticated user whose `sub` has no connector account (or whose connection was revoked) still gets the public tools;
+personal tools return the structured `CONNECTION_REVOKED` error, exactly as the READ-token path does. Personal tools read
+only that account's snapshots; no READ token is involved on this path.
+
+### Standalone, with any issuer
+
+```sh
+UBC_MCP_HTTP=on \
+UBC_PUBLIC_ORIGIN=https://ubc.example.org \
+UBC_OAUTH_ISSUER=https://auth.example.org \
+UBC_PLATFORM_ADAPTER=none \
+npm run connector
+```
+
+Create the account for each user with `link-account` (the issuer defaults to `UBC_OAUTH_ISSUER`); it prints the upload token
+the browser extension or `push` uses, like `create-binding`. Running it again prints the same token.
+
+```sh
+UBC_DATA_DIR=/data UBC_OAUTH_ISSUER=https://auth.example.org node dist/connector/cli.js link-account --sub alice
+# {"sub":"alice","issuer":"https://auth.example.org","id":"...","uploadToken":"..."}
+```
+
+Register `https://ubc.example.org/mcp` as the resource (audience) at your authorization server and make it put the
+user's connector username in `sub`. Setting `UBC_PLATFORM_ADAPTER=none` matters here: `UBC_PUBLIC_ORIGIN` alone would
+otherwise enable the deprecated `mcphub` adapter. Behind a reverse proxy, forward `/mcp` and `/.well-known/oauth-protected-resource`.
+
+### With MCPHub
+
+MCPHub is one possible issuer. Its admin adds an `externalResources` entry whose resource is
+`<UBC_PUBLIC_ORIGIN>/mcp` and allows the client; set `UBC_OAUTH_ISSUER` to the MCPHub base URL and keep the audience at its default.
+MCPHub then connects to the endpoint with its personal OAuth identity mode (the access token's `sub` is the MCPHub username,
+which is the account name `mcphub-oauth` creates). That wiring is a separate step.
+
 ## Optional: MCPHub integration
 
 Everything here is optional and disabled by default. The MCP server and the
