@@ -15,3 +15,7 @@ location ^~ /ubc/ {
 # In the EXISTING exact /v1/snapshots location, permit OPTIONS in addition
 # to GET and POST. Keep its proxy target, no-cache and logging protections.
 # The connector answers extension preflight; do not add wildcard CORS here.
+# With UBC_PLATFORM_ADAPTER=mcphub-oauth the connector ignores every cookie except
+# its own ubc_session and ubc_oauth, so no Hub cookie is needed there. To be strict,
+# replace the Cookie line in the /ubc/ location above with:
+#   proxy_set_header Cookie "ubc_session=$cookie_ubc_session; ubc_oauth=$cookie_ubc_oauth";

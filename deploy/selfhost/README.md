@@ -33,8 +33,9 @@ selects `edge`; `beta` is not assumed to exist before a release runs this workfl
    `.env` and protect it with `chmod 600 .env`.
 2. Set `UBC_CONNECTOR_IMAGE` to an available version or digest,
    `UBC_HUB_NETWORK` to the existing Docker network, and (only for the optional
-   MCPHub integration) `UBC_PLATFORM_ADAPTER=mcphub` with `UBC_PUBLIC_ORIGIN` set to
-   the Hub HTTPS origin. Without the adapter the connector runs standalone. Create the data directory explicitly:
+   MCPHub integration) `UBC_PLATFORM_ADAPTER=mcphub-oauth` with `UBC_PUBLIC_ORIGIN`,
+   `UBC_PLATFORM_URL`, `UBC_OAUTH_CLIENT_ID` and `UBC_SESSION_SECRET` (see the README
+   section "Connecting to MCPHub (OAuth)"; the older cookie-based `mcphub` adapter is deprecated). Without the adapter the connector runs standalone. Create the data directory explicitly:
    `install -d -m 700 -o 10792 -g 10792 /opt/ubc-connector/data`.
 3. Set `UBC_DATA_PATH` to that host directory and `UBC_DATA_DIR=/data/connector`.
 4. Run `docker compose config -q`, `docker compose pull`, and
@@ -55,7 +56,7 @@ First record `docker inspect` for the existing connector and its Compose config:
 
 - the actual host data mount and the in-container `UBC_DATA_DIR`;
 - current image digest, container/network name and aliases;
-- public origin and any explicit `UBC_HUB_URL` (now `UBC_PLATFORM_URL`); add `UBC_PLATFORM_ADAPTER=mcphub` to keep self-service enabled after upgrading;
+- public origin and any explicit `UBC_HUB_URL` (now `UBC_PLATFORM_URL`); add `UBC_PLATFORM_ADAPTER=mcphub` to keep self-service enabled after upgrading (deprecated; `mcphub-oauth` is the replacement);
 - CPU/memory settings and existing port binding.
 
 The deployed installation may store `connector.sqlite` directly in `/data`, or

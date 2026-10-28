@@ -1,14 +1,14 @@
-import {isExtensionOrigin} from '../extension-origin.js';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import type {Store} from '../store.js';
 import type {PlatformAdapter} from './index.js';
 import {page,script} from './mcphub-web.js';
+import {handleClaim,SERVER_NAME} from './shared.js';
 export type McphubConfig={origin:string;platformUrl?:string;serverName?:string};
 // MCPHub integration: reuses the caller's Hub session to read identity and to
 // save a per-user credential. Everything Hub-specific lives in this module.
 export function mcphubAdapter(store:Store,config:McphubConfig):PlatformAdapter {
   const origin=new URL(config.origin).origin,hub=new URL(config.platformUrl??origin),serverName=config.serverName??'ubc-personal';
-  if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(serverName))throw new Error('Invalid platform server name');
+  if(!SERVER_NAME.test(serverName))throw new Error('Invalid platform server name');
   if(new URL(origin).protocol!=='https:'||!['https:','http:'].includes(hub.protocol)||hub.username||hub.password||hub.search||hub.hash)throw new Error('Invalid self-service origin');
   async function api(path:string,cookie:string,method='GET',body?:unknown) {
     const r=await fetch(new URL(path,hub),{method,headers:{Cookie:cookie,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),redirect:'error',signal:AbortSignal.timeout(10_000)});
@@ -27,12 +27,7 @@ export function mcphubAdapter(store:Store,config:McphubConfig):PlatformAdapter {
     const expected=req.url==='/ubc/api/status'?'GET':'POST';
     if(req.method!==expected){send(405,{error:'METHOD_NOT_ALLOWED'});return;}
     if(claim) {
-      // One-use random code authorizes only an upload credential, never a Hub session.
-      if(req.headers.cookie||(req.headers.origin&&!isExtensionOrigin(req.headers.origin))){send(403,{error:'EXTENSION_REQUIRED'});return;}
-      if(req.headers.origin){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');}
-      const chunks:Buffer[]=[];let n=0;
-      for await(const c of req){n+=c.length;if(n>1024){send(413,{error:'TOO_LARGE'});return;}chunks.push(c);}
-      try{const result=store.claim(JSON.parse(Buffer.concat(chunks).toString()).code);send(result?200:401,result??{error:'PAIRING_EXPIRED_OR_USED'});}catch{send(400,{error:'INVALID_REQUEST'});}return;
+      await handleClaim(store,req,res,send);return;
     }
     if(req.headers.authorization||req.headers['x-auth-token']||!req.headers.cookie||(req.method==='POST'&&req.headers.origin!==origin)||(req.headers['sec-fetch-site']&&req.headers['sec-fetch-site']!=='same-origin')){send(403,{error:'LOGIN_OR_SAME_ORIGIN_REQUIRED'});return;}
     try {

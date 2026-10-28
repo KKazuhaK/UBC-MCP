@@ -69,6 +69,10 @@ Update only the connector image/app and unpacked extension. The existing alpha.1
 Hub stdio clients remain compatible with the snapshot read API; do not change
 Hub source, server definitions, visibility, startup configuration or database.
 
+DEPRECATED cookie-based mode: new deployments should use UBC_PLATFORM_ADAPTER=mcphub-oauth
+(README, "Connecting to MCPHub (OAuth)"), which needs an OAuth client registered in MCPHub and
+listed in the server's credentialWriteClients.
+
 Enable the connector GUI with UBC_PLATFORM_ADAPTER=mcphub and
 UBC_PUBLIC_ORIGIN set to your Hub's public HTTPS origin (the adapter is off by
 default). UBC_PLATFORM_URL (formerly UBC_HUB_URL) is optional and defaults to that public origin.
