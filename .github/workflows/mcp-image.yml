@@ -163,6 +163,13 @@ jobs:
             BUILD_TIME=${{ needs.meta.outputs.built_at }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      # The smoke test drives the image with the MCP client from the lockfile.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+
       - name: Smoke test
         run: node scripts/image-smoke.mjs ubc-mcp:smoke
 
