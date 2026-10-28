@@ -1,0 +1,313 @@
+name: MCP server image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v[0-9]*']
+    # Nothing here goes into the image or gates it. (Path filters are not
+    # evaluated for tag pushes, so a release tag always builds.)
+    paths-ignore:
+      - '*.md'
+      - '**/*.md'
+      - 'docs/**'
+      - 'articles/**'
+      - 'examples/**'
+      - 'skills/**'
+      - 'tests/**'
+      - 'deploy/**'
+      - 'extension/**'
+      - 'extension-firefox/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/kkazuhak/ubc-mcp
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Release tag must match package.json
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          v="$(node -p "require('./package.json').version")"
+          [ "$TAG" = "v$v" ] || { echo "tag $TAG does not equal v$v from package.json" >&2; exit 1; }
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run test:protocol
+      - run: npm run test:smoke
+
+  meta:
+    needs: verify
+    name: Compute version
+    if: ${{ github.repository == 'KKazuhaK/UBC-MCP' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      label_version: ${{ steps.v.outputs.label_version }}
+      built_at: ${{ steps.v.outputs.built_at }}
+      stable: ${{ steps.v.outputs.stable }}
+      is_tag: ${{ steps.v.outputs.is_tag }}
+    steps:
+      - name: Derive version from the ref
+        id: v
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$REF" == refs/tags/* ]]; then
+            version="${REF_NAME#v}"
+            re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'
+            if [[ ! "$version" =~ $re ]]; then
+              echo "tag '${REF_NAME}' must be v<x.y.z>[-alpha.<n>|-beta.<n>|-rc.<n>]" >&2
+              exit 1
+            fi
+            # Only an unsuffixed version moves latest.
+            stable=true
+            if [[ "$version" == *-* ]]; then stable=false; fi
+            is_tag=true
+          else
+            version=""
+            stable=false
+            is_tag=false
+          fi
+          # What the image label and manifest annotation say: the release
+          # version, or edge-<short sha> for a branch build.
+          label_version="${version:-edge-${GITHUB_SHA::7}}"
+          {
+            echo "version=${version}"
+            echo "label_version=${label_version}"
+            echo "built_at=$(date -u +%FT%TZ)"
+            echo "stable=${stable}"
+            echo "is_tag=${is_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and push (${{ matrix.slug }})
+    needs: meta
+    if: ${{ github.repository == 'KKazuhaK/UBC-MCP' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Native runners for each architecture: no QEMU emulation.
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/kkazuhak/ubc-mcp
+          labels: |
+            org.opencontainers.image.title=ubc-mcp
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.meta.outputs.label_version }}
+            org.opencontainers.image.created=${{ needs.meta.outputs.built_at }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+            org.opencontainers.image.description=UBC course discovery MCP server (stdio)
+
+      # Built into the local Docker daemon only; nothing is pushed or logged in
+      # until the smoke test below has passed.
+      - name: Build image for the smoke test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          tags: ubc-mcp:smoke
+          build-args: |
+            BUILD_VERSION=${{ needs.meta.outputs.label_version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ needs.meta.outputs.built_at }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Smoke test
+        run: node scripts/image-smoke.mjs ubc-mcp:smoke
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same inputs as the build above, so the builder cache makes this a
+      # rebuild-free push. Pushed by digest only; the publish job tags the
+      # multi-arch index.
+      - name: Push image by digest
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_VERSION=${{ needs.meta.outputs.label_version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ needs.meta.outputs.built_at }}
+          outputs: type=image,name=ghcr.io/kkazuhak/ubc-mcp,push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "the push reported no valid digest" >&2
+            exit 1
+          }
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ matrix.slug }}
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    name: Publish multi-arch image
+    needs: [meta, build]
+    if: ${{ github.repository == 'KKazuhaK/UBC-MCP' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/kkazuhak/ubc-mcp
+          tags: |
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ needs.meta.outputs.version }},enable=${{ needs.meta.outputs.is_tag == 'true' }}
+            type=raw,value=latest,enable=${{ needs.meta.outputs.is_tag == 'true' && needs.meta.outputs.stable == 'true' }}
+            type=raw,value=beta,enable=${{ needs.meta.outputs.is_tag == 'true' }}
+
+      - name: Create the multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          REVISION: ${{ github.sha }}
+          VERSION: ${{ needs.meta.outputs.label_version }}
+          BUILT_AT: ${{ needs.meta.outputs.built_at }}
+        run: |
+          set -euo pipefail
+          tag_args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then tag_args+=(-t "$tag"); fi
+          done <<<"$TAGS"
+          if [ "${#tag_args[@]}" -eq 0 ]; then
+            echo "no tags to publish for ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          sources=()
+          for digest in *; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+              echo "unexpected digest file name: ${digest}" >&2
+              exit 1
+            }
+            sources+=("${IMAGE}@sha256:${digest}")
+          done
+          docker buildx imagetools create \
+            "${tag_args[@]}" \
+            --annotation "index:org.opencontainers.image.source=${SOURCE}" \
+            --annotation "index:org.opencontainers.image.revision=${REVISION}" \
+            --annotation "index:org.opencontainers.image.version=${VERSION}" \
+            --annotation "index:org.opencontainers.image.created=${BUILT_AT}" \
+            "${sources[@]}"
+
+      - name: Read the index digest
+        id: digest
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          first_tag="$(printf '%s\n' "$TAGS" | head -n 1)"
+          digest="$(docker buildx imagetools inspect "$first_tag" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "could not read a valid index digest" >&2
+            exit 1
+          }
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          {
+            echo "Published \`${IMAGE}@${digest}\`, tagged:"
+            while IFS= read -r tag; do
+              if [ -n "$tag" ]; then echo "- \`${tag}\`"; fi
+            done <<<"$TAGS"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest the image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/kkazuhak/ubc-mcp
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false

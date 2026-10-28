@@ -7,7 +7,8 @@ services:
     user: "10792:10792"
     environment:
       UBC_DATA_DIR: ${UBC_DATA_DIR:?Set the actual existing container data directory}
-      UBC_PUBLIC_ORIGIN: ${UBC_PUBLIC_ORIGIN:?Set the existing HTTPS page origin}
+      UBC_PLATFORM_ADAPTER: ${UBC_PLATFORM_ADAPTER:-}
+      UBC_PUBLIC_ORIGIN: ${UBC_PUBLIC_ORIGIN:-}
       UBC_CONNECTOR_HOST: 0.0.0.0
       UBC_CONNECTOR_PORT: "8792"
     ports: ["127.0.0.1:8792:8792"]

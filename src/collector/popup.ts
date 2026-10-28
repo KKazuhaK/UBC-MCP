@@ -1,11 +1,11 @@
 import {parseSnapshot,type Snapshot} from '../model.js';
-import {DEFAULT_HUB,hubOrigin,storedConnection} from './connection.js';
+import {hubOrigin,storedConnection} from './connection.js';
 import {extractWorkdayDom} from './dom.js';
 import {normalizeCapture} from './normalize.js';
 import {extractRegistrationDom,normalizeRegistrations} from './registrations.js';
 declare const browser:typeof chrome;
 const extensionApi=typeof browser!=='undefined'?browser:chrome;
-let origin=DEFAULT_HUB;
+let origin='';
 const el=(id:string)=>document.getElementById(id)!;
 const status=el('status');
 let pending:Snapshot[]=[],busy=false,paired=false,autoSync=false;
@@ -33,9 +33,13 @@ async function action(id:string,label:string,work:()=>Promise<void>) {
   finally{busy=false;document.body.setAttribute('aria-busy','false');if(button.tagName==='BUTTON'){if(id!=='auto-toggle'||!completed)button.textContent=original;button.removeAttribute('aria-busy');}controls();}
 }
 async function showConnection() {
-  const x=await extensionApi.storage.local.get(['ubcUploadToken','ubcConnection','ubcHubOrigin','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;origin=connection?.origin??DEFAULT_HUB;
+  const x=await extensionApi.storage.local.get(['ubcUploadToken','ubcLegacyToken','ubcConnection','ubcHubOrigin','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;
+  // A pre-0.4 token with no resolvable origin is parked under another key (not deleted) and the user is asked to reconnect.
+  if(!connection&&x.ubcUploadToken){await extensionApi.storage.local.set({ubcLegacyToken:x.ubcUploadToken});await extensionApi.storage.local.remove(['ubcUploadToken']);x.ubcLegacyToken=x.ubcUploadToken;delete x.ubcUploadToken;}
+  // Only a successful new connection retires it.
+  else if(connection&&x.ubcConnection&&x.ubcLegacyToken)await extensionApi.storage.local.remove(['ubcLegacyToken']);
   autoSync=!!x.ubcAutoSync;
-  el('connection').textContent=connection?`Connected · ${connection.origin}`:'Not connected · Sign in through your MCPHub.';
+  el('connection').textContent=connection?`Connected · ${connection.origin}`:x.ubcLegacyToken?'Please reconnect · your earlier connection can no longer be used. Enter your server address and connect again.':'Not connected · Sign in through your MCPHub.';
   el('connect-setup').hidden=paired;el('connected-actions').hidden=!paired;
   el('auto-status').textContent=!paired?'Connect to MCPHub to sync.':x.ubcSyncError?`Sync issue: ${x.ubcSyncError}`:x.ubcAutoSync?`Automatic sync is on.${x.ubcLastSync?.at?' Last sync: '+new Date(x.ubcLastSync.at).toLocaleString()+'.':''}`:'Enable automatic sync with the button below.';
   el('auto-toggle').textContent=x.ubcAutoSync?'Pause automatic sync':'Enable automatic sync';
@@ -75,7 +79,7 @@ el('pair').onclick=()=>action('pair','Pairing with your account…',async()=>{
   await extensionApi.storage.local.set({ubcConnection:{origin,uploadToken:x.uploadToken}});await showConnection();feedback('Account paired. Next, preview your Workday data.','success');
 });
 el('forget').onclick=()=>action('forget','Removing local connection…',async()=>{
-  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']);pending=[];el('preview').textContent='';await showConnection();
+  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError','ubcLegacyToken']);pending=[];el('preview').textContent='';await showConnection();
   try{await extensionApi.runtime.sendMessage({type:'ubc.sync.stop'});}catch{/* The local connection is already removed. */}
   feedback('Local connection removed. To revoke server access and delete snapshots, use the connection page.','success');
 });
@@ -107,7 +111,7 @@ el('snapshot-file').onchange=()=>action('snapshot-file','Reading and validating 
   }finally{input.value='';}
 });
 el('upload').onclick=()=>action('upload','Preparing upload…',async()=>{
-  const connection=storedConnection(await extensionApi.storage.local.get(['ubcUploadToken','ubcConnection']));
+  const connection=storedConnection(await extensionApi.storage.local.get(['ubcUploadToken','ubcLegacyToken','ubcConnection']));
   if(!connection)throw new Error('Pair the extension first.');if(!pending.length)throw new Error('Preview data first.');
   const {uploadToken:ubcUploadToken,origin:uploadOrigin}=connection;
   let completed=0;const total=pending.length;

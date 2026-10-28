@@ -6,8 +6,9 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Store} from '../dist/connector/store.js';
 import {connectorServer} from '../dist/connector/http.js';
+import {mcphubAdapter} from '../dist/connector/adapters/mcphub.js';
 import {snapshot,section} from './fixtures.mjs';
-const extension='chrome-extension://'+'a'.repeat(32),origin='https://mcp.kazuhahub.com';
+const extension='chrome-extension://'+'a'.repeat(32),origin='https://hub.example.test';
 async function setup(t){
  const dir=mkdtempSync(join(tmpdir(),'ubc-self-')),store=new Store(dir),saved=new Map();
  const hub=createServer(async(req,res)=>{
@@ -23,7 +24,7 @@ async function setup(t){
   }else{res.writeHead(404);res.end('{}');}
  });
  await new Promise(r=>hub.listen(0,'127.0.0.1',r));
- const server=connectorServer(store,{origin,hubUrl:`http://127.0.0.1:${hub.address().port}`});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const server=connectorServer(store,mcphubAdapter(store,{origin,platformUrl:`http://127.0.0.1:${hub.address().port}`}));await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const url=`http://127.0.0.1:${server.address().port}`;
  t.after(async()=>{await Promise.all([new Promise(r=>server.close(r)),new Promise(r=>hub.close(r))]);store.close();rmSync(dir,{recursive:true,force:true});});
  const call=(action,who='A',extra={})=>fetch(url+'/ubc/api/'+action,{method:action==='status'?'GET':'POST',headers:{Cookie:`session=${who}`,Origin:origin,...extra},redirect:'error'});
@@ -66,7 +67,7 @@ test('self-service credentials survive restart encrypted; new pairing invalidate
 });
 
 test('connection GUI connects, displays pairing, cancels deletion and shows server failures',async()=>{
- const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/web.js');
+ const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/adapters/mcphub-web.js');
  const {document}=parseHTML(page),calls=[];let connected=false,allowDelete=false,fail=false;
  const fetch=async(url,options)=>{calls.push({url,options});if(fail)return {ok:false,json:async()=>({message:'Sign in to Hub'})};const action=url.split('/').at(-1);if(action==='connect')connected=true;if(action==='disconnect')connected=false;return {ok:true,json:async()=>action==='status'?{connected,scopes:[]}:action==='pair'?{code:'one-use-code'}:{connected}};};
  runInNewContext(script,{document,fetch,AbortSignal,confirm:()=>allowDelete,alert:()=>{}});
@@ -81,7 +82,7 @@ test('connection GUI connects, displays pairing, cancels deletion and shows serv
 });
 
 test('connection page exposes slow-request progress, rejects duplicate clicks and recovers from timeout',async()=>{
- const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/web.js');
+ const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/adapters/mcphub-web.js');
  const {document}=parseHTML(page);let rejectConnect,requests=0;
  const fetch=async(url)=>{if(url.endsWith('/status'))return {ok:true,json:async()=>({connected:false,scopes:[]})};requests++;return new Promise((resolve,reject)=>rejectConnect=reject);};
  runInNewContext(script,{document,fetch,AbortSignal,confirm:()=>true,alert:()=>{}});await new Promise(r=>setImmediate(r));
@@ -102,7 +103,7 @@ test('Firefox extension CORS still requires scoped credentials and rejects web-o
 });
 
 test('pairing panel copies only the current code and clears it on expiry',async()=>{
- const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/web.js');
+ const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/adapters/mcphub-web.js');
  const {document}=parseHTML(page);let now=100000,tick,copied;
  const fetch=async url=>({ok:true,json:async()=>url.endsWith('/status')?{connected:true,scopes:[]}:{code:'a'.repeat(43),expires:now+2000}});
  runInNewContext(script,{document,fetch,AbortSignal,Date:{now:()=>now},setInterval:fn=>{tick=fn;return 1;},clearInterval:()=>{},navigator:{clipboard:{writeText:async value=>{copied=value;}}},confirm:()=>true,alert:()=>{}});await new Promise(r=>setImmediate(r));
@@ -112,7 +113,7 @@ test('pairing panel copies only the current code and clears it on expiry',async(
 });
 
 test('extension authorization uses Hub session and hands off only a one-use upload code',async t=>{
- const {parseHTML}=await import('linkedom'),{runInNewContext}=await import('node:vm'),{page,script}=await import('../dist/connector/web.js');
+ const {parseHTML}=await import('linkedom'),{runInNewContext}=await import('node:vm'),{page,script}=await import('../dist/connector/adapters/mcphub-web.js');
  const {url,store,saved}=await setup(t),{document,window}=parseHTML(page),nonce='a'.repeat(64),calls=[];
  const fetchPage=async(path,options)=>{calls.push(path);return fetch(url+path,{...options,headers:{...options.headers,Cookie:'session=A',Origin:origin}});};
  runInNewContext(script,{document,location:{hash:'#extension-auth='+nonce},MutationObserver:window.MutationObserver,fetch:fetchPage,AbortSignal,confirm:()=>false,alert:()=>{},navigator:{},console,setInterval,clearInterval});

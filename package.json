@@ -27,8 +27,11 @@
     "start": "node dist/cli.js",
     "connector": "node dist/connector/cli.js serve",
     "test:protocol": "npm run build && node scripts/protocol-check.mjs",
+    "test:smoke": "npm run build && node scripts/smoke-standalone.mjs",
     "build:extension": "node scripts/build-extension.mjs",
-    "build:firefox": "node scripts/build-firefox.mjs"
+    "build:firefox": "node scripts/build-firefox.mjs",
+    "build:extension:release": "UBC_RELEASE=official node scripts/build-extension.mjs",
+    "build:firefox:release": "UBC_RELEASE=official node scripts/build-firefox.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",

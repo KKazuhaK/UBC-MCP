@@ -12,16 +12,16 @@ test('extension pairing keeps only upload credential in trusted local storage an
  const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120',legalComments:'none'});
  runInNewContext(bundle.outputFiles[0].text,{document,chrome,fetch,AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
  assert.equal(access,'TRUSTED_CONTEXTS');assert.equal(document.getElementById('upload').disabled,true);
- document.getElementById('hub-origin').value='https://mcp.kazuhahub.com';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
- assert.equal(requests[0].url,'https://mcp.kazuhahub.com/ubc/api/claim');assert.equal(requests[0].options.credentials,'omit');assert.equal(requests[0].options.redirect,'error');assert.equal(document.getElementById('pair-code').value,'');
- assert.deepEqual(Object.keys(state),['ubcConnection']);assert.equal(state.ubcConnection.uploadToken,'b'.repeat(43));assert.equal(state.ubcConnection.origin,'https://mcp.kazuhahub.com');
+ document.getElementById('hub-origin').value='https://hub.example.test';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
+ assert.equal(requests[0].url,'https://hub.example.test/ubc/api/claim');assert.equal(requests[0].options.credentials,'omit');assert.equal(requests[0].options.redirect,'error');assert.equal(document.getElementById('pair-code').value,'');
+ assert.deepEqual(Object.keys(state),['ubcConnection']);assert.equal(state.ubcConnection.uploadToken,'b'.repeat(43));assert.equal(state.ubcConnection.origin,'https://hub.example.test');
  assert.equal(document.getElementById('connect-setup').hidden,true);assert.equal(document.getElementById('connected-actions').hidden,false);
  await document.getElementById('upload').onclick();assert.equal(requests.length,1);assert.match(document.getElementById('status').textContent,/Preview data first/);
  const timestamp=new Date().toISOString(),data=snapshot({capturedAt:timestamp,sections:[section({observedAt:timestamp})]});
  const input=document.getElementById('snapshot-file');input.files=[{size:100,text:async()=>JSON.stringify(data)}];
  await input.onchange();assert.equal(document.getElementById('upload').disabled,false);assert.equal(requests.length,1);
  document.getElementById('hub-origin').value='https://different.example.com';
- await document.getElementById('upload').onclick();assert.equal(requests.length,2);assert.equal(requests[1].url,'https://mcp.kazuhahub.com/v1/snapshots');assert.equal(requests[1].options.headers.Authorization,'Bearer '+'b'.repeat(43));assert.equal(JSON.parse(requests[1].options.body).capturedAt,timestamp);
+ await document.getElementById('upload').onclick();assert.equal(requests.length,2);assert.equal(requests[1].url,'https://hub.example.test/v1/snapshots');assert.equal(requests[1].options.headers.Authorization,'Bearer '+'b'.repeat(43));assert.equal(JSON.parse(requests[1].options.body).capturedAt,timestamp);
  input.files=[{size:100,text:async()=>'{"not":"snapshot"}'}];await input.onchange();assert.equal(document.getElementById('upload').disabled,true);
  await document.getElementById('forget').onclick();assert.equal(state.ubcConnection,undefined);assert.equal(document.getElementById('upload').disabled,true);
  assert.equal(document.getElementById('connect-setup').hidden,false);assert.equal(document.getElementById('connected-actions').hidden,true);
@@ -33,7 +33,7 @@ test('extension shows pairing progress immediately, blocks duplicate actions and
  const fetch=()=>{requests++;return new Promise(r=>finish=r);};
  const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120',legalComments:'none'});
  runInNewContext(bundle.outputFiles[0].text,{document,chrome,fetch,AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
- const pair=document.getElementById('pair');document.getElementById('hub-origin').value='https://mcp.kazuhahub.com';document.getElementById('pair-code').value='a'.repeat(43);
+ const pair=document.getElementById('pair');document.getElementById('hub-origin').value='https://hub.example.test';document.getElementById('pair-code').value='a'.repeat(43);
  const task=pair.onclick();assert.match(pair.textContent,/Pairing/);assert.equal(pair.getAttribute('aria-busy'),'true');assert.equal(document.getElementById('status').dataset.state,'loading');assert.equal(document.getElementById('forget').disabled,true);
  await pair.onclick();await document.getElementById('forget').onclick();assert.equal(requests,1);
  finish({ok:false,status:401});await task;
@@ -56,7 +56,7 @@ test('Firefox HTTP 403 pairing error distinguishes missing server support from a
  const browser={storage:{local:{get:async()=>({})}}};
  const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'firefox142',legalComments:'none'});
  runInNewContext(bundle.outputFiles[0].text,{document,browser,fetch:async()=>({ok:false,status:403}),AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
- document.getElementById('hub-origin').value='https://mcp.kazuhahub.com';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
+ document.getElementById('hub-origin').value='https://hub.example.test';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
  assert.match(document.getElementById('status').textContent,/upgrade the UBC connector/);assert.doesNotMatch(document.getElementById('status').textContent,/expired/);assert.equal(document.getElementById('pair').disabled,false);
 });
 
@@ -70,4 +70,26 @@ test('connected users can pause and resume automatic sync without reconnecting',
  await toggle.onclick();assert.equal(state.ubcAutoSync,false);assert.equal(toggle.textContent,'Enable automatic sync');
  await toggle.onclick();assert.equal(state.ubcAutoSync,true);assert.equal(toggle.textContent,'Pause automatic sync');
  assert.deepEqual(messages.map(m=>m.type),['ubc.sync.configure','ubc.sync.configure']);
+});
+
+test('a legacy token with no resolvable origin is parked, not deleted, and retired only by a new connection or Forget',async()=>{
+ const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));
+ const state={ubcUploadToken:'b'.repeat(43)};
+ const chrome={storage:{local:{setAccessLevel:async()=>{},get:async()=>({...state}),set:async x=>Object.assign(state,x),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete state[key];}}}};
+ const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120',legalComments:'none'});
+ runInNewContext(bundle.outputFiles[0].text,{document,chrome,fetch:async()=>({ok:true,json:async()=>({uploadToken:'c'.repeat(43)})}),AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
+ assert.equal('ubcUploadToken'in state,false);assert.equal(state.ubcLegacyToken,'b'.repeat(43));
+ assert.match(document.getElementById('connection').textContent,/Please reconnect/);assert.equal(document.getElementById('connect-setup').hidden,false);
+ document.getElementById('hub-origin').value='https://hub.example.test';document.getElementById('pair-code').value='a'.repeat(43);await document.getElementById('pair').onclick();
+ assert.equal(state.ubcConnection.uploadToken,'c'.repeat(43));assert.equal('ubcLegacyToken'in state,false);  // retired only once the new connection exists
+ const {storedConnection}=await import('../dist/collector/connection.js');
+ assert.equal(storedConnection({ubcLegacyToken:'b'.repeat(43)}),null);
+});
+test('legacy origin is embedded only by an explicit official release build',async()=>{
+ const {execFileSync}=await import('node:child_process');
+ const run=env=>JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',"import('./scripts/release-config.mjs').then(m=>console.log(JSON.stringify(m.legacyHubOrigin)))"],{env:{PATH:process.env.PATH,...env},encoding:'utf8'}));
+ assert.equal(run({}),'');
+ assert.equal(run({UBC_RELEASE:'dev'}),'');
+ assert.match(run({UBC_RELEASE:'official'}),/^https:\/\//);
+ assert.equal(run({UBC_LEGACY_HUB_ORIGIN:'https://x.example.test'}),'https://x.example.test');
 });

@@ -69,8 +69,10 @@ Update only the connector image/app and unpacked extension. The existing alpha.1
 Hub stdio clients remain compatible with the snapshot read API; do not change
 Hub source, server definitions, visibility, startup configuration or database.
 
-Enable the connector GUI with UBC_PUBLIC_ORIGIN=https://mcp.kazuhahub.com.
-UBC_HUB_URL is optional and defaults to that public origin. It is an
+Enable the connector GUI with UBC_PLATFORM_ADAPTER=mcphub and
+UBC_PUBLIC_ORIGIN set to your Hub's public HTTPS origin (the adapter is off by
+default). UBC_PLATFORM_URL (formerly UBC_HUB_URL) is optional and defaults to that public origin.
+UBC_PLATFORM_SERVER_NAME defaults to ubc-personal. It is an
 operator-controlled fixed upstream, never a URL supplied by a browser. Use the
 public URL initially so the existing login gateway participates. Never bypass
 identity validation by trusting username headers. Hub cookies are relayed in

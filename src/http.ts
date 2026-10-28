@@ -1,3 +1,4 @@
+import {VERSION} from './version.js';
 export class SourceError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
@@ -32,7 +33,7 @@ export class PublicHttp {
     if (cached && cached.expires > Date.now()) return cached;
     const pending = this.pending.get(url); if (pending) return pending;
     const job = (async () => {
-      const r = await this.request(url, {headers:{'User-Agent':'ubc-mcp/0.1.0-alpha.5',Accept:'application/json,text/html'},
+      const r = await this.request(url, {headers:{'User-Agent':`ubc-mcp/${VERSION}`,Accept:'application/json,text/html'},
         redirect:'error',signal:AbortSignal.timeout(25_000)});
       if (!r.ok) {
         await r.body?.cancel();
