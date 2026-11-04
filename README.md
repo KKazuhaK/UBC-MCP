@@ -389,7 +389,7 @@ uses `/api/credentials/<server>` and `/oauth/*` from the discovery document as s
    model as the cookie adapter, so existing users keep their snapshots), then
    `PUT`s that account's READ token to `/api/credentials/<server>` with the access
    token as Bearer. The access token is then dropped.
-4. The connector sets its own signed session cookie (account id, **15 minutes**: it is only needed to finish pairing; after that, connect again from the page) and
+4. The connector sets its own signed session cookie (account id, **7 days**, so coming back to the page within a week, for example from a Hub management link, needs no new authorization; **Forget this browser** or Disconnect ends it sooner) and
    shows the page with a pairing code for the extension. The extension's
    "Connect with MCPHub" works as before.
 5. **Disconnect** requires a fresh authorization: the page starts the flow with
