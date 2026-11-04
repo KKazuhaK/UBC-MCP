@@ -118,7 +118,7 @@ Extension 0.2.3 prepares Firefox support and fixes startup stuck at Checking.
 For a Firefox submission build, run npm run build:firefox. See
 [signing preparation](docs/firefox-publishing.md) and
 [privacy](docs/extension-privacy.md). The ZIP is unsigned; Mozilla signing is
-still required for persistent installation. Firefox pairing/upload requires
+still required for persistent installation. Firefox connection/upload requires
 connector alpha.4, which has not yet been deployed from this workstation.
 
 ## Capture Workday course data
@@ -390,8 +390,8 @@ uses `/api/credentials/<server>` and `/oauth/*` from the discovery document as s
    `PUT`s that account's READ token to `/api/credentials/<server>` with the access
    token as Bearer. The access token is then dropped.
 4. The connector sets its own signed session cookie (account id, **7 days**, so coming back to the page within a week, for example from a Hub management link, needs no new authorization; **Forget this browser** or Disconnect ends it sooner) and
-   shows the page with a pairing code for the extension. The extension's
-   "Connect with MCPHub" works as before.
+   shows the connection page. The extension's "Connect with MCPHub" completes
+   through it.
 5. **Disconnect** requires a fresh authorization: the page starts the flow with
    `intent=disconnect`; after MCPHub confirms the same user, the callback deletes
    the credential on MCPHub and revokes the connector binding and snapshots.
@@ -435,11 +435,8 @@ proxy instead of the whole `Cookie` header.
   `/healthz`, User-Agent). `/healthz` returns `{"ok":true,"version":"..."}`.
 - **Extension first run:** no server address is built in; the field starts empty and
   you enter your own HTTPS address. Connections made with 0.4.x keep their stored
-  origin. A pre-0.4 connection (token without an origin) is migrated only by
-  official builds (`npm run build:extension:release`, `UBC_RELEASE=official`), which
-  embed the origin from `release/extension.json`; dev and fork builds embed nothing.
-  If it cannot be resolved the extension keeps the token under another key and shows
-  "Please reconnect"; it is removed after a new connection succeeds or on Forget.
+  origin. Older connections (a token without an origin) are not migrated; connect again
+  with MCPHub.
 - **Images:** the stdio server image is published as `ghcr.io/kkazuhak/ubc-mcp` by
   the `MCP server image` workflow. Release tags must equal `v` + the `package.json`
   version or the workflows fail. As in the connector workflow, every `v*` tag (stable or
@@ -454,8 +451,7 @@ that user's READ credential. It does not change Hub source, server configuration
 or permissions. Hub access rules still apply: each user must be allowed to access the configured Hub server (`ubc-personal` by default).
 
 The extension requests local storage and optional access to the user-selected Hub origin and UBC Workday, in addition to activeTab/scripting/downloads. It stores the UPLOAD credential
-in extension-local trusted-context storage, never browser sync storage. Pairing
-codes must be kept private. Forgetting the extension's local connection does not
+in extension-local trusted-context storage, never browser sync storage. Forgetting the extension's local connection does not
 revoke the server credential; use Disconnect on the connection page to revoke all
 credentials and delete current snapshots. Historical backups have separate retention.
 
@@ -464,7 +460,7 @@ credentials and delete current snapshots. Historical backups have separate reten
 Extension 0.4.0 and connector alpha.5 support **Connect with MCPHub** and automatic sync of supported open pages. New installations
 start with an empty server field. Enter your own MCPHub HTTPS origin, allow access
 to that origin, sign in there, and approve the extension connection. No token or
-pairing code needs to be copied. The connection persists in local extension
+code needs to be copied. The connection persists in local extension
 storage across normal browser restarts. Firefox still requires a signed install
 for the extension itself to survive a restart.
 
@@ -474,7 +470,4 @@ needed. The connector verifies the current Hub session and existing access to th
 Hub server before issuing the upload-only credential. This is session reuse rather
 than a new OAuth server (this is the deprecated `mcphub` adapter; prefer `mcphub-oauth`). An outdated connector is reported before authorization.
 
-Credentials remain bound to their original origin when switching servers. Legacy
-0.2.x connections remain bound to their original deployment; they are never
-silently reassigned to a newly entered origin. Manual code pairing remains an
-advanced fallback. The extension syncs registrations through a temporary background Workday tab every 15 minutes, plus recognized open course-search pages. A manual sync button and a pause control are available. It does not fetch the full catalog.
+Credentials remain bound to their original origin when switching servers. The extension syncs registrations through a temporary background Workday tab every 15 minutes, plus recognized open course-search pages. A manual sync button and a pause control are available. It does not fetch the full catalog.
