@@ -94,7 +94,7 @@ test('connect flow: PKCE + state verified, code exchanged, READ token saved with
   const done=await req(a.headers.get('location'));
   assert.equal(done.status,302);assert.equal(done.headers.get('location'),'/ubc/?connected=1');
   const cookies=done.headers.getSetCookie();
-  const session=cookies.find(c=>c.startsWith('ubc_session='));assert.match(session,/HttpOnly/);assert.match(session,/SameSite=Lax/);assert.match(session,/Max-Age=900/);
+  const session=cookies.find(c=>c.startsWith('ubc_session='));assert.match(session,/HttpOnly/);assert.match(session,/SameSite=Lax/);assert.match(session,/Max-Age=604800/);
   assert.ok(cookies.some(c=>c.startsWith('ubc_oauth=;')&&c.includes('Max-Age=0')));
   // Server side: code exchanged with the matching verifier, userinfo + PUT carried the token as Bearer.
   const token=hub.requests.find(r=>r.path==='/oauth/token'),put=hub.requests.find(r=>r.method==='PUT');
@@ -232,7 +232,7 @@ test('sessions are signed, bound to a live account, and expire',async t=>{
   await flow();const value=jar.get('ubc_session');assert.equal((await status()).authenticated,true);
   jar.set('ubc_session',value.replace(/.$/,c=>c==='A'?'B':'A'));assert.equal((await status()).authenticated,false);
   jar.set('ubc_session',value);assert.equal((await status()).authenticated,true);
-  const original=Date.now;try{Date.now=()=>original()+61*60_000;assert.equal((await status()).authenticated,false);}finally{Date.now=original;}
+  const original=Date.now,day=24*60*60_000;try{Date.now=()=>original()+6*day;assert.equal((await status()).authenticated,true);Date.now=()=>original()+7*day+60_000;assert.equal((await status()).authenticated,false);}finally{Date.now=original;}
   store.revoke(store.account('alice').id);assert.equal((await status()).authenticated,false);   // revocation ends the session
 });
 
