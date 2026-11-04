@@ -19,7 +19,10 @@ jobs:
       - run: npm run test:smoke
       - run: npm run build:extension
       - run: npm run build:firefox
-      - run: npx --yes web-ext@10.8.0 lint --source-dir .data/firefox-extension --warnings-as-errors
+      # web-ext comes from the committed lockfile that the release workflow also uses.
+      - run: npm ci --ignore-scripts
+        working-directory: release/tools
+      - run: release/tools/node_modules/.bin/web-ext lint --source-dir .data/firefox-extension --warnings-as-errors
       - run: npm pack --dry-run
       - run: docker build -t ubc-mcp:check .
       - run: node scripts/image-smoke.mjs ubc-mcp:check

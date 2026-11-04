@@ -117,7 +117,7 @@ remain in historical backups; manage backup retention separately.
 Extension 0.2.3 prepares Firefox support and fixes startup stuck at Checking.
 For a Firefox submission build, run npm run build:firefox. See
 [signing preparation](docs/firefox-publishing.md) and
-[privacy](docs/extension-privacy.md). The ZIP is unsigned; Mozilla signing is
+[privacy](docs/extension-privacy.md) ([中文](docs/extension-privacy.zh.md)). The ZIP is unsigned; Mozilla signing is
 still required for persistent installation. Firefox pairing/upload requires
 connector alpha.4, which has not yet been deployed from this workstation.
 
@@ -137,7 +137,7 @@ This starts a temporary loopback connector, checks personal MCP queries and
 revocation, prints aggregate results, then removes the temporary encrypted store.
 It does not upload the input file to the public Internet or delete the input file.
 
-The extension has no built-in server address. Load the `extension/` folder as an unpacked Chrome extension, or build and load `extension-firefox/` for Firefox. Automatic synchronization requires user-granted host access to UBC Workday and the server address you enter (see the optional MCPHub section). Without a server, use the offline export and `push` flow below. It does not read passwords or cookies.
+Releases published after this workflow was added carry the packaged official builds (`ubc-course-capture-chrome-<version>.zip`, an unsigned Firefox zip, the source archive and checksums); see [extension release](docs/chrome-release.md). Official builds embed one legacy origin, used only to resume pre-0.4 connections; otherwise the extension has no built-in server address. Load the `extension/` folder as an unpacked Chrome extension, or build and load `extension-firefox/` for Firefox. Automatic synchronization requires user-granted host access to UBC Workday and the server address you enter (see the optional MCPHub section). Without a server, use the offline export and `push` flow below. It does not read passwords or cookies.
 Log into Workday yourself and complete Duo. Navigate to **Find Course Sections**,
 select a specific Winter Term (not the umbrella Winter Session), and search.
 Refresh the results before capturing. Open a section detail dialog to include

@@ -1,0 +1,260 @@
+name: Browser extension release
+
+# When a release is published (prereleases included: every UBC MCP release so
+# far is one), build UBC Course Capture for Chrome and Firefox as official
+# release builds and attach both zips, the source archive and their checksums
+# to the release. The extension keeps its own version in extension/manifest.json;
+# the asset names carry that version, not the release tag.
+#
+# Store submission is opt-in, skips cleanly until configured, and runs only for
+# a stable release or a manual run with submit_to_stores. A store refuses a
+# version it already has, so bump extension/manifest.json before submitting.
+# The first listing in each store is created by hand. After that:
+#   Chrome  variables CHROME_PUBLISHER_ID, CHROME_EXTENSION_ID
+#           secrets   CHROME_CLIENT_ID, CHROME_CLIENT_SECRET, CHROME_REFRESH_TOKEN
+#   Firefox variable  FIREFOX_ADDON_ID, the gecko id. Keep it
+#                     ubc-course-capture@mcp.kazuhahub.com unless the add-on was
+#                     created under another id; it is stamped into the manifest
+#           variable  FIREFOX_CHANNEL, optional: unlisted (default, signed for
+#                     self-distribution and attached to the release) or listed
+#           secrets   AMO_JWT_ISSUER, AMO_JWT_SECRET
+# The Firefox zip on the release is unsigned; Firefox installs only a copy
+# signed by Mozilla.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to (re)build the extension for, e.g. v0.1.0-alpha.8'
+        required: true
+        type: string
+      submit_to_stores:
+        description: 'Also submit to the configured stores, even for a prerelease'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-extension-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  # No write access here: npm dependencies run in this job.
+  build:
+    name: Build extension zips
+    if: github.repository == 'KKazuhaK/UBC-MCP'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      # The tooling comes from the workflow's own commit, so a manual run for an
+      # older tag still finds it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .workflow
+          persist-credentials: false
+          sparse-checkout: release/tools
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Read the extension version
+        id: v
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./extension/manifest.json').version")"
+          # Store versions are plain x.y.z with no leading zeros (stores also cap each part at 65535).
+          part='(0|[1-9][0-9]{0,4})'
+          if [[ ! "$version" =~ ^${part}\.${part}\.${part}$ ]]; then
+            echo "extension/manifest.json version '$version' is not x.y.z" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Test and build
+        env:
+          UBC_FIREFOX_ADDON_ID: ${{ vars.FIREFOX_ADDON_ID }}
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm test
+          npm run build:extension:release
+          npm run build:firefox:release
+      - name: Lint the Firefox build
+        run: |
+          set -euo pipefail
+          (cd .workflow/release/tools && npm ci --ignore-scripts)
+          .workflow/release/tools/node_modules/.bin/web-ext lint --source-dir .data/firefox-extension --warnings-as-errors
+      - name: Zip and checksum
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir out
+          (cd extension && zip -qrX "$GITHUB_WORKSPACE/out/ubc-course-capture-chrome-${VERSION}.zip" .)
+          (cd .data/firefox-extension && zip -qrX "$GITHUB_WORKSPACE/out/ubc-course-capture-firefox-${VERSION}-unsigned.zip" .)
+          # Add-ons reviewers need the source of the bundled build: the whole
+          # tree at the tag, since the bundle also pulls in src/model.ts.
+          git archive --format=zip -o "out/ubc-course-capture-source-${VERSION}.zip" HEAD
+          (cd out && sha256sum -- *.zip > "ubc-course-capture-${VERSION}-SHA256SUMS.txt" && cat -- *SHA256SUMS.txt)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: extension-zips
+          path: out/*
+          if-no-files-found: error
+
+  attach:
+    name: Attach zips to the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: extension-zips
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: gh release upload "$TAG" ./*.zip ./*SHA256SUMS.txt --clobber -R "$GITHUB_REPOSITORY"
+
+  chrome-web-store:
+    name: Submit to Chrome Web Store
+    needs: build
+    if: >-
+      vars.CHROME_EXTENSION_ID != '' && vars.CHROME_PUBLISHER_ID != '' &&
+      ((github.event_name == 'release' && !github.event.release.prerelease) ||
+       (github.event_name == 'workflow_dispatch' && inputs.submit_to_stores))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: extension-zips
+      - name: Upload and publish (Chrome Web Store API v2)
+        env:
+          ITEM: publishers/${{ vars.CHROME_PUBLISHER_ID }}/items/${{ vars.CHROME_EXTENSION_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          api=https://chromewebstore.googleapis.com
+          if ! grant=$(curl -sS --fail-with-body https://oauth2.googleapis.com/token \
+            --data-urlencode client_id@<(printf %s "$CLIENT_ID") \
+            --data-urlencode client_secret@<(printf %s "$CLIENT_SECRET") \
+            --data-urlencode refresh_token@<(printf %s "$REFRESH_TOKEN") \
+            -d grant_type=refresh_token); then
+            echo "token request failed: $(echo "$grant" | jq -c '{error, error_description}' 2>/dev/null || echo "$grant")" >&2
+            exit 1
+          fi
+          token=$(echo "$grant" | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then echo "no access token in the response; check the CHROME_* secrets" >&2; exit 1; fi
+          echo "::add-mask::$token"
+          auth=(-H "Authorization: Bearer $token")
+
+          upload=$(curl -sS --fail-with-body -X POST "${auth[@]}" -H "Content-Type: application/zip" \
+            --data-binary "@ubc-course-capture-chrome-${VERSION}.zip" "$api/upload/v2/${ITEM}:upload?uploadType=media")
+          echo "$upload"
+          state=$(echo "$upload" | jq -r .uploadState)
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            [ "$state" = IN_PROGRESS ] || break
+            sleep 6
+            state=$(curl -sS --fail-with-body "${auth[@]}" "$api/v2/${ITEM}:fetchStatus" | jq -r '.lastAsyncUploadState // "IN_PROGRESS"')
+          done
+          if [ "$state" != SUCCEEDED ]; then echo "upload ended in state $state" >&2; exit 1; fi
+
+          publish=$(curl -sS --fail-with-body -X POST "${auth[@]}" -H "Content-Type: application/json" \
+            -d '{}' "$api/v2/${ITEM}:publish")
+          echo "$publish"
+          echo "$publish" | jq -e '.state | IN("PENDING_REVIEW", "STAGED", "PUBLISHED", "PUBLISHED_TO_TESTERS")' > /dev/null
+
+  firefox-add-ons:
+    name: Submit to Firefox Add-ons
+    needs: build
+    if: >-
+      vars.FIREFOX_ADDON_ID != '' &&
+      ((github.event_name == 'release' && !github.event.release.prerelease) ||
+       (github.event_name == 'workflow_dispatch' && inputs.submit_to_stores))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: release/tools
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # web-ext and its dependencies come from the committed lockfile, with
+      # install scripts off, before any secret is in the environment.
+      - name: Install web-ext
+        working-directory: release/tools
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: extension-zips
+          path: out
+      - name: Sign and submit
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          VERSION: ${{ needs.build.outputs.version }}
+          ADDON_ID: ${{ vars.FIREFOX_ADDON_ID }}
+          CHANNEL: ${{ vars.FIREFOX_CHANNEL || 'unlisted' }}
+        run: |
+          set -euo pipefail
+          case "$CHANNEL" in listed) timeout=0 ;; unlisted) timeout=900000 ;; *) echo "FIREFOX_CHANNEL must be listed or unlisted, got '$CHANNEL'" >&2; exit 1 ;; esac
+          mkdir firefox && unzip -q "out/ubc-course-capture-firefox-${VERSION}-unsigned.zip" -d firefox
+          id=$(jq -r .browser_specific_settings.gecko.id firefox/manifest.json)
+          if [ "$id" != "$ADDON_ID" ]; then echo "manifest gecko id '$id' is not FIREFOX_ADDON_ID '$ADDON_ID'" >&2; exit 1; fi
+          # A listed version waits for review, so it is not waited for; an
+          # unlisted one is signed automatically and downloaded.
+          release/tools/node_modules/.bin/web-ext sign \
+            --source-dir firefox --artifacts-dir web-ext-artifacts \
+            --channel "$CHANNEL" --approval-timeout "$timeout" \
+            --upload-source-code "out/ubc-course-capture-source-${VERSION}.zip"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: firefox-signed
+          path: web-ext-artifacts/*.xpi
+          if-no-files-found: ignore
+
+  attach-signed:
+    name: Attach the signed Firefox add-on
+    needs: [build, firefox-add-ons]
+    if: vars.FIREFOX_CHANNEL != 'listed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: firefox-signed
+      - name: Upload the signed XPI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          xpi=(./*.xpi)
+          if [ "${#xpi[@]}" -ne 1 ]; then echo "expected one signed XPI, found ${#xpi[@]}" >&2; exit 1; fi
+          name="ubc-course-capture-firefox-${VERSION}.xpi"
+          cp -- "${xpi[0]}" "$name"
+          sha256sum -- "$name" > "$name.sha256"
+          gh release upload "$TAG" "$name" "$name.sha256" --clobber -R "$GITHUB_REPOSITORY"

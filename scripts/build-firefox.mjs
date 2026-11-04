@@ -1,12 +1,14 @@
 import {build} from 'esbuild';
 import {define} from './release-config.mjs';
-import {mkdir,readFile,writeFile,copyFile,cp} from 'node:fs/promises';
-const out='.data/firefox-extension';await mkdir(out,{recursive:true});
+import {mkdir,readFile,writeFile,copyFile,cp,rm} from 'node:fs/promises';
+// Start clean so a release zip of this directory holds only this build's files.
+const out='.data/firefox-extension';await rm(out,{recursive:true,force:true});await mkdir(out,{recursive:true});
 const manifest=JSON.parse(await readFile('extension/manifest.json','utf8'));
 manifest.background={scripts:['background.js']};
-manifest.browser_specific_settings={gecko:{id:process.env.UBC_FIREFOX_ADDON_ID||'ubc-course-capture@mcp.kazuhahub.com',strict_min_version:'142.0',data_collection_permissions:{required:['authenticationInfo','websiteContent']}}};
+manifest.browser_specific_settings={gecko:{id:process.env.UBC_FIREFOX_ADDON_ID||'ubc-course-capture@mcp.kazuhahub.com',strict_min_version:'142.0',data_collection_permissions:{required:['authenticationInfo','personallyIdentifyingInfo','websiteContent']}}};
 await writeFile(out+'/manifest.json',JSON.stringify(manifest,null,2)+'\n');
 await copyFile('extension/popup.html',out+'/popup.html');
+await cp('src/collector/icons',out+'/icons',{recursive:true,force:true,filter:src=>!src.endsWith('.svg')});
 await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'esm',target:'firefox142',outfile:out+'/popup.js',legalComments:'none',define});
 console.log('Prepared Firefox submission directory: '+out+' (unsigned; signing required for persistent installation)');
 
