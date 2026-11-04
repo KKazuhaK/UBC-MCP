@@ -66,7 +66,7 @@ test('self-service credentials survive restart encrypted; new pairing invalidate
  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('connection GUI connects, displays pairing, cancels deletion and shows server failures',async()=>{
+test('connection GUI connects, has no manual pairing, cancels deletion and shows server failures',async()=>{
  const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/adapters/mcphub-web.js');
  const {document}=parseHTML(page),calls=[];let connected=false,allowDelete=false,fail=false;
  const fetch=async(url,options)=>{calls.push({url,options});if(fail)return {ok:false,json:async()=>({message:'Sign in to Hub'})};const action=url.split('/').at(-1);if(action==='connect')connected=true;if(action==='disconnect')connected=false;return {ok:true,json:async()=>action==='status'?{connected,scopes:[]}:action==='pair'?{code:'one-use-code'}:{connected}};};
@@ -74,9 +74,9 @@ test('connection GUI connects, displays pairing, cancels deletion and shows serv
  await new Promise(r=>setImmediate(r));
  await document.getElementById('connect').onclick();assert.equal(connected,true);
  assert.match(document.getElementById('status').textContent,/已连接/);
- await document.getElementById('pair').onclick();assert.equal(document.getElementById('code').value,'one-use-code');assert.equal(document.getElementById('pairing').hidden,false);
+ for(const id of ['pair','pairing','code','copy','manual'])assert.equal(document.getElementById(id),null,id);
  await document.getElementById('disconnect').onclick();assert.equal(connected,true);
- allowDelete=true;await document.getElementById('disconnect').onclick();assert.equal(connected,false);assert.equal(document.getElementById('code').value,'');
+ allowDelete=true;await document.getElementById('disconnect').onclick();assert.equal(connected,false);
  fail=true;await document.getElementById('refresh').onclick();assert.equal(document.getElementById('status').textContent,'Sign in to Hub');
  assert.ok(calls.every(c=>c.options.credentials==='same-origin'&&c.options.redirect==='error'));
 });
@@ -102,15 +102,6 @@ test('Firefox extension CORS still requires scoped credentials and rejects web-o
  for(const bad of ['moz-extension://bad','moz-extension://01234567-89ab-cdef-0123-456789abcdef.evil.com','https://moz-extension.example','null'])assert.equal((await fetch(url+'/v1/snapshots',{method:'POST',headers:{Origin:bad,Authorization:`Bearer ${uploadToken}`},body})).status,403);
 });
 
-test('pairing panel copies only the current code and clears it on expiry',async()=>{
- const {parseHTML}=await import('linkedom');const {runInNewContext}=await import('node:vm');const {page,script}=await import('../dist/connector/adapters/mcphub-web.js');
- const {document}=parseHTML(page);let now=100000,tick,copied;
- const fetch=async url=>({ok:true,json:async()=>url.endsWith('/status')?{connected:true,scopes:[]}:{code:'a'.repeat(43),expires:now+2000}});
- runInNewContext(script,{document,fetch,AbortSignal,Date:{now:()=>now},setInterval:fn=>{tick=fn;return 1;},clearInterval:()=>{},navigator:{clipboard:{writeText:async value=>{copied=value;}}},confirm:()=>true,alert:()=>{}});await new Promise(r=>setImmediate(r));
- await document.getElementById('pair').onclick();assert.equal(document.getElementById('copy').disabled,false);assert.match(document.getElementById('expires').textContent,/0:02/);
- await document.getElementById('copy').onclick();assert.equal(copied,'a'.repeat(43));assert.equal(document.getElementById('copy').textContent,'已复制');
- now+=3000;tick();assert.equal(document.getElementById('code').value,'');assert.equal(document.getElementById('copy').disabled,true);assert.match(document.getElementById('expires').textContent,/已过期/);
-});
 
 test('extension authorization uses Hub session and hands off only a one-use upload code',async t=>{
  const {parseHTML}=await import('linkedom'),{runInNewContext}=await import('node:vm'),{page,script}=await import('../dist/connector/adapters/mcphub-web.js');

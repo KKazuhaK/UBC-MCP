@@ -5,7 +5,6 @@ import {normalizeCapture} from './normalize.js';
 import {extractRegistrationDom,normalizeRegistrations} from './registrations.js';
 declare const browser:typeof chrome;
 const extensionApi=typeof browser!=='undefined'?browser:chrome;
-let origin='';
 const el=(id:string)=>document.getElementById(id)!;
 const status=el('status');
 let pending:Snapshot[]=[],busy=false,paired=false,autoSync=false;
@@ -15,7 +14,7 @@ function feedback(message:string,state:'loading'|'success'|'error'|'info'='info'
 function controls() {
   document.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled=busy||(b.id==='upload'&&(!paired||!pending.length))||(b.id==='sync-all'&&(!paired||!autoSync))||(b.id==='auto-toggle'&&!paired));
   document.querySelectorAll<HTMLInputElement>('input').forEach(i=>i.disabled=busy);
-  el('upload-hint').textContent=!paired?'Pair your account before uploading.':pending.length?`${pending.length} period(s) ready. Review the preview before uploading.`:'Preview a Workday page or import a file to enable upload.';
+  el('upload-hint').textContent=!paired?'Connect your account before uploading.':pending.length?`${pending.length} period(s) ready. Review the preview before uploading.`:'Preview a Workday page or import a file to enable upload.';
 }
 function errorMessage(e:unknown) {
   if(e instanceof Error&&['TimeoutError','AbortError'].includes(e.name))return 'The request timed out. Check your connection and try again.';
@@ -33,13 +32,9 @@ async function action(id:string,label:string,work:()=>Promise<void>) {
   finally{busy=false;document.body.setAttribute('aria-busy','false');if(button.tagName==='BUTTON'){if(id!=='auto-toggle'||!completed)button.textContent=original;button.removeAttribute('aria-busy');}controls();}
 }
 async function showConnection() {
-  const x=await extensionApi.storage.local.get(['ubcUploadToken','ubcLegacyToken','ubcConnection','ubcHubOrigin','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;
-  // A pre-0.4 token with no resolvable origin is parked under another key (not deleted) and the user is asked to reconnect.
-  if(!connection&&x.ubcUploadToken){await extensionApi.storage.local.set({ubcLegacyToken:x.ubcUploadToken});await extensionApi.storage.local.remove(['ubcUploadToken']);x.ubcLegacyToken=x.ubcUploadToken;delete x.ubcUploadToken;}
-  // Only a successful new connection retires it.
-  else if(connection&&x.ubcConnection&&x.ubcLegacyToken)await extensionApi.storage.local.remove(['ubcLegacyToken']);
+  const x=await extensionApi.storage.local.get(['ubcConnection','ubcHubOrigin','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;
   autoSync=!!x.ubcAutoSync;
-  el('connection').textContent=connection?`Connected · ${connection.origin}`:x.ubcLegacyToken?'Please reconnect · your earlier connection can no longer be used. Enter your server address and connect again.':'Not connected · Sign in through your MCPHub.';
+  el('connection').textContent=connection?`Connected · ${connection.origin}`:'Not connected · Sign in through your MCPHub.';
   el('connect-setup').hidden=paired;el('connected-actions').hidden=!paired;
   el('auto-status').textContent=!paired?'Connect to MCPHub to sync.':x.ubcSyncError?`Sync issue: ${x.ubcSyncError}`:x.ubcAutoSync?`Automatic sync is on.${x.ubcLastSync?.at?' Last sync: '+new Date(x.ubcLastSync.at).toLocaleString()+'.':''}`:'Enable automatic sync with the button below.';
   el('auto-toggle').textContent=x.ubcAutoSync?'Pause automatic sync':'Enable automatic sync';
@@ -53,7 +48,7 @@ async function initialize(){
     const setup=async()=>{
       // Firefox has no setAccessLevel. This extension declares no content scripts.
       if(typeof extensionApi.storage.local.setAccessLevel==='function')await extensionApi.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
-      const data=await showConnection();(el('hub-origin') as HTMLInputElement).value=data.ubcHubOrigin??(paired?origin:'');
+      const data=await showConnection();(el('hub-origin') as HTMLInputElement).value=data.ubcHubOrigin??'';
     };
     await Promise.race([setup(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Could not read the local connection. Reopen the extension or reload it, then try again.')),8000);})]);
     feedback(paired?'Connected. Workday sync is ready.':'Ready. Enter your MCPHub address to connect.');
@@ -61,25 +56,8 @@ async function initialize(){
   finally{if(timer)clearTimeout(timer);busy=false;controls();}
 }
 void initialize();
-el('pair').onclick=()=>action('pair','Pairing with your account…',async()=>{
-  const input=el('pair-code') as HTMLInputElement,code=input.value.trim();
-  if(!/^[\w-]{43}$/.test(code))throw new Error('Paste a valid pairing code from the connection page.');
-  origin=hubOrigin((el('hub-origin') as HTMLInputElement).value);
-  if(extensionApi.permissions?.request&&!await extensionApi.permissions.request({origins:[origin+'/*']}))throw new Error('Site access is needed to connect to this MCPHub.');
-  input.value='';
-  const r=await fetch(origin+'/ubc/api/claim',{method:'POST',credentials:'omit',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),signal:AbortSignal.timeout(15_000)});
-  if(!r.ok){
-    await r.body?.cancel();
-    if(r.status===403&&typeof browser!=='undefined')throw new Error('Firefox pairing is not enabled on this server (HTTP 403). The operator needs to upgrade the UBC connector; generating another code will not fix this.');
-    if(r.status===401)throw new Error('Pairing code expired or already used. Generate a new code in your own Hub account and try again.');
-    if(r.status===429)throw new Error('Too many pairing attempts. Wait a minute, then try again.');
-    throw new Error(`Pairing service returned HTTP ${r.status}. Please retry or contact the service operator.`);
-  }
-  const x=await r.json();if(!/^[\w-]{43}$/.test(x.uploadToken))throw new Error('Invalid pairing response. Please try a new pairing code.');
-  await extensionApi.storage.local.set({ubcConnection:{origin,uploadToken:x.uploadToken}});await showConnection();feedback('Account paired. Next, preview your Workday data.','success');
-});
 el('forget').onclick=()=>action('forget','Removing local connection…',async()=>{
-  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError','ubcLegacyToken']);pending=[];el('preview').textContent='';await showConnection();
+  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']);pending=[];el('preview').textContent='';await showConnection();
   try{await extensionApi.runtime.sendMessage({type:'ubc.sync.stop'});}catch{/* The local connection is already removed. */}
   feedback('Local connection removed. To revoke server access and delete snapshots, use the connection page.','success');
 });
@@ -96,7 +74,7 @@ async function capture(kind:'sections'|'registrations'):Promise<Snapshot[]> {
 function clearPreview(){pending=[];el('preview').textContent='';}
 function showPreview() {
   el('preview').textContent=pending.map(s=>`${s.campus} ${s.academicPeriod.id} · ${s.kind}\n${s.sections.length} sections · ${s.capturedAt}\n`+s.sections.map(c=>`${c.subject} ${c.course} ${c.code}`).join('\n')).join('\n\n');
-  feedback(`Preview ready: ${pending.length} period(s), ${pending.reduce((n,s)=>n+s.sections.length,0)} section(s). ${paired?'Review below, then click Upload.':'Pair your account before uploading.'}`,'success');
+  feedback(`Preview ready: ${pending.length} period(s), ${pending.reduce((n,s)=>n+s.sections.length,0)} section(s). ${paired?'Review below, then click Upload.':'Connect your account before uploading.'}`,'success');
 }
 for(const [id,kind]of [['preview-sections','sections'],['preview-registrations','registrations']]as const)
   el(id).onclick=()=>action(id,kind==='sections'?'Reading course sections…':'Reading your registrations…',async()=>{clearPreview();pending=await capture(kind);showPreview();});
@@ -111,15 +89,15 @@ el('snapshot-file').onchange=()=>action('snapshot-file','Reading and validating 
   }finally{input.value='';}
 });
 el('upload').onclick=()=>action('upload','Preparing upload…',async()=>{
-  const connection=storedConnection(await extensionApi.storage.local.get(['ubcUploadToken','ubcLegacyToken','ubcConnection']));
-  if(!connection)throw new Error('Pair the extension first.');if(!pending.length)throw new Error('Preview data first.');
+  const connection=storedConnection(await extensionApi.storage.local.get(['ubcConnection']));
+  if(!connection)throw new Error('Connect the extension first.');if(!pending.length)throw new Error('Preview data first.');
   const {uploadToken:ubcUploadToken,origin:uploadOrigin}=connection;
   let completed=0;const total=pending.length;
   while(pending.length){
     feedback(`Uploading period ${completed+1} of ${total}… Keep this popup open until it finishes.`,'loading');
     el('upload').textContent=`Uploading ${completed+1} of ${total}…`;
     const r=await fetch(uploadOrigin+'/v1/snapshots',{method:'POST',credentials:'omit',redirect:'error',headers:{Authorization:`Bearer ${ubcUploadToken}`,'Content-Type':'application/json'},body:JSON.stringify(pending[0]),signal:AbortSignal.timeout(20_000)});
-    if(!r.ok){await r.body?.cancel();if(r.status===401){await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection']);await showConnection();throw new Error('Your connection was revoked. Pair again using a new code.');}throw new Error(`Upload stopped after ${completed} of ${total} periods (HTTP ${r.status}). Refresh Workday and preview again.`);}
+    if(!r.ok){await r.body?.cancel();if(r.status===401){await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection']);await showConnection();throw new Error('Your connection was revoked. Connect again with MCPHub.');}throw new Error(`Upload stopped after ${completed} of ${total} periods (HTTP ${r.status}). Refresh Workday and preview again.`);}
     await r.body?.cancel();pending.shift();completed++;
   }
   feedback(`Synced ${completed} period(s). You can close Chrome. Sync again when your Workday data changes.`,'success');

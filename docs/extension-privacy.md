@@ -9,9 +9,9 @@ registration capture includes your registered/waitlisted course choices. It is
 designed to discard your student name and student ID. It does not intentionally
 collect grades, finances, passwords, Workday cookies or browsing history.
 
-Automatic synchronization and manual upload send snapshots to /v1/snapshots on the MCPHub HTTPS origin you explicitly choose. Preview and export actions do not themselves upload snapshots. The extension starts with an empty server field and you must enter your own address. Only official release builds (built with UBC_RELEASE=official) embed one origin, the original hub of this project, and only to resume a pre-0.4 connection that stored an upload token without an origin: when you open the extension, that stored token is used for Bearer-authenticated uploads of your snapshots to /v1/snapshots on that origin, exactly as it was paired. Nothing is sent there for new installs or 0.4.x connections, and development or fork builds embed no origin. Connect with MCPHub opens its UBC
+Automatic synchronization and manual upload send snapshots to /v1/snapshots on the MCPHub HTTPS origin you explicitly choose. Preview and export actions do not themselves upload snapshots. The extension starts with an empty server field and you must enter your own address; no server address is built in. Connect with MCPHub opens its UBC
 connection page, where you sign in and approve. A one-use code is automatically
-exchanged for an upload-only credential without copying a token or pairing code. That credential is kept in
+exchanged for an upload-only credential without copying a token or code. That credential is kept in
 extension-local storage, not browser sync storage. There is no analytics or
 advertising endpoint. Automatic registration sync opens a temporary Workday page while the browser is running and the Workday session is valid. The user can pause sync. It does not read a full catalog or perform registration actions.
 A background worker completes the approved connection even if the popup closes.
@@ -27,11 +27,11 @@ operator. Forget local connection removes the extension's local credential only.
 Downloaded JSON exports are plaintext files under your own control.
 
 Firefox's submission manifest declares authenticationInfo and websiteContent
-transmission, because pairing credentials and selected Workday page data are
+transmission, because connection credentials and selected Workday page data are
 sent to the configured service. It does not declare that the extension sends no
 data. The Firefox package requires version 142 or newer for built-in data consent.
 
 For privacy questions, open an issue without credentials or private snapshots:
 https://github.com/KKazuhaK/UBC-MCP/issues
 
-Pre-0.4 connections without a stored origin are resumed only by an official release build; otherwise the token is parked locally under another key (not deleted), the extension shows "Please reconnect", and the token is removed after a new connection succeeds or when you choose Forget. See the release build configuration in docs/firefox-publishing.md.
+Connections without a stored origin (pre-0.4) are not used; the extension shows "Not connected" and you connect again with MCPHub.

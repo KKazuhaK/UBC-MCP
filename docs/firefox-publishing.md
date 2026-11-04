@@ -55,12 +55,3 @@ Official references:
 https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/
 https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/
 
-## Release build configuration
-
-Only an official release build embeds the origin used to resume pre-0.4
-connections (token stored without an origin). Build with
-`npm run build:firefox:release` (or `build:extension:release` for Chrome), which
-sets `UBC_RELEASE=official`; the origin comes from `release/extension.json`
-(`legacyHubOrigin`). Plain `npm run build:firefox` / `build:extension` and fork
-builds embed nothing. Setting `UBC_LEGACY_HUB_ORIGIN` explicitly overrides the file.
-The origin is injected at build time and is not a default in `src/`.

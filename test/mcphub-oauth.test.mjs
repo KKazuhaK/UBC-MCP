@@ -331,12 +331,23 @@ test('page script: connect navigates to the OAuth start, mutating calls send the
   runInNewContext(script,{document,fetch,AbortSignal,URLSearchParams,location:{hash:'',search:'',assign:u=>assigned.push(u)},confirm:()=>true,alert:()=>{}});
   await new Promise(r=>setImmediate(r));
   assert.match(document.getElementById('status').textContent,/已连接/);
-  await document.getElementById('pair').onclick();
-  const pairCall=calls.find(c=>c.url==='/ubc/api/pair');assert.equal(pairCall.options.headers['X-CSRF-Token'],'c'.repeat(43));
+  for(const id of ['pair','pairing','code','copy','manual'])assert.equal(document.getElementById(id),null,id);
   await document.getElementById('disconnect').onclick();
   assert.deepEqual(assigned,['https://hub.example.test/oauth/authorize?x=1']);assert.equal(JSON.parse(calls.find(c=>c.url==='/ubc/oauth/start').options.body).intent,'disconnect');
   document.getElementById('connect').onclick();assert.equal(assigned.at(-1),'/ubc/oauth/start');
   assert.ok(calls.every(c=>c.options.credentials==='same-origin'&&c.options.redirect==='error'));
+});
+
+test('page script: the #extension-auth flow pairs through the CSRF-protected API and writes {state,code} for the extension',async()=>{
+  const {parseHTML}=await import('linkedom'),{runInNewContext}=await import('node:vm'),{page,script}=await import('../dist/connector/adapters/mcphub-oauth-web.js');
+  const {document}=parseHTML(page),calls=[],state='a'.repeat(64);
+  const fetch=async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('/status')?{authenticated:true,username:'alice',csrf:'c'.repeat(43),scopes:[]}:{code:'x'.repeat(43),expires:Date.now()+1000}};};
+  runInNewContext(script,{document,fetch,AbortSignal,URLSearchParams,MutationObserver:class{observe(){}},location:{hash:'#extension-auth='+state,search:'',assign:()=>{}},confirm:()=>true,alert:()=>{}});
+  await new Promise(r=>setImmediate(r));
+  assert.equal(document.getElementById('extension-login').hidden,false);
+  await document.getElementById('extension-authorize').onclick();
+  assert.equal(calls.find(c=>c.url==='/ubc/api/pair').options.headers['X-CSRF-Token'],'c'.repeat(43));
+  assert.deepEqual(JSON.parse(document.getElementById('ubc-extension-authorization').textContent),{state,code:'x'.repeat(43)});
 });
 
 test('configuration is validated at startup with clear messages',t=>{
