@@ -2,17 +2,14 @@
 
 ## Release builds
 
-Official packages are built with `npm run build:extension:release`, which sets
-`UBC_RELEASE=official` so the origin in `release/extension.json` is embedded to
-resume pre-0.4 connections. Plain `npm run build:extension` embeds nothing. See
-"Release build configuration" in [firefox-publishing.md](firefox-publishing.md).
-Without the origin, a pre-0.4 connection is parked and the user is asked to reconnect.
+Build the package with `npm run build:extension` (Chrome) and `npm run build:firefox`.
+No server address is embedded; users enter their own MCPHub address.
 
 ## Release assets
 
 `.github/workflows/browser-extension-release.yml` runs when a release is
 published (prereleases included) or by hand for an existing tag. It tests,
-makes both official builds, lints the Firefox build and attaches to the release:
+makes both builds, lints the Firefox build and attaches to the release:
 
 - `ubc-course-capture-chrome-<version>.zip`: load unpacked, or upload to the Chrome Web Store;
 - `ubc-course-capture-firefox-<version>-unsigned.zip`: for Mozilla signing; Firefox

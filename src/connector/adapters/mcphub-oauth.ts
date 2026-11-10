@@ -12,7 +12,7 @@ type Discovery={issuer:string|null;authorize:URL;token:URL;userinfo:URL;basicAut
 type Tx={s:string;v:string;i:Intent;e:number;x?:string;u?:string};
 type Session={u:string;b:string;e:number;c:string};
 
-const TX_COOKIE='ubc_oauth',SESSION_COOKIE='ubc_session',TX_TTL=10*60_000,SESSION_TTL=15*60_000,DISCOVERY_TTL=5*60_000;
+const TX_COOKIE='ubc_oauth',SESSION_COOKIE='ubc_session',TX_TTL=10*60_000,SESSION_TTL=7*24*60*60_000,DISCOVERY_TTL=5*60_000;
 const LOOPBACK=['localhost','127.0.0.1','[::1]'];
 // Standard authorization-response errors (RFC 6749 4.1.2.1) plus invalid_client; anything else is logged as unrecognized.
 const OAUTH_ERRORS=new Set(['invalid_request','unauthorized_client','access_denied','unsupported_response_type','invalid_scope','server_error','temporarily_unavailable','invalid_client']);

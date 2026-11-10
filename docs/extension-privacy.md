@@ -8,9 +8,8 @@ it to a UBC connector behind an MCPHub server that you choose, so AI assistants
 you connect to that server can plan courses with your own data. It is an
 independent open-source project, not made by or affiliated with UBC or Workday.
 
-This policy covers extension version 0.4.0 and later. (0.4.0 declared only
-authentication information and website content in Firefox's data consent;
-0.4.1 adds personally identifying information.) The source is public at
+This policy covers extension version 0.4.1 and later; earlier versions are
+described in this file's history. The source is public at
 https://github.com/KKazuhaK/UBC-MCP; the extension is in `src/collector/` and
 `extension/`, and the server side in `src/connector/`.
 
@@ -18,8 +17,7 @@ https://github.com/KKazuhaK/UBC-MCP; the extension is in `src/collector/` and
 
 - The extension reads UBC Workday pages (`https://wd10.myworkday.com/ubc/`) only
   after you grant it access, and sends recognized course and registration data
-  only to the MCPHub address you enter. The one exception is a connection saved
-  by a version before 0.4; see [Older connections](#older-connections).
+  only to the MCPHub address you enter. No server address is built in.
 - Your Workday password and cookies are never read. Your name, student ID and
   other page content are not sent: registration captures are built to leave
   out your name and student ID.
@@ -63,8 +61,7 @@ described below.
 
 - **Connect with MCPHub turns on automatic sync**, as soon as you click it,
   even if you do not finish connecting. You can pause it with Pause automatic
-  sync at any time. Connecting with a one-time pairing code does not turn it on
-  by itself.
+  sync at any time.
 - **Background registration sync.** About one minute after sync is turned on
   and then every 15 minutes while the browser is running, the extension makes
   your browser open View My Courses in a background tab, with your existing
@@ -85,13 +82,13 @@ described below.
 
 ## Where the data goes
 
-The extension sends data only to the MCPHub origin you entered (or, for an
-older connection, the address below), over HTTPS, without browser cookies:
+The extension sends data only to the MCPHub origin you entered, over HTTPS,
+without browser cookies:
 
 | Request | When | What is sent |
 | --- | --- | --- |
 | `GET /ubc/capabilities` | Connect with MCPHub | nothing beyond a normal request |
-| `POST /ubc/api/claim` | after you approve the connection, or with a pairing code | the one-time code |
+| `POST /ubc/api/claim` | after you approve the connection | the one-time code |
 | `POST /v1/snapshots` | each sync or upload | one snapshot (the data above) and your upload credential |
 
 Like any web request, these reveal your IP address, the time and your browser
@@ -106,17 +103,6 @@ small script in that tab only. It reads the one-time code the page hands to
 the extension, not your MCPHub cookies, profile or session, and exchanges that
 code for an upload credential.
 
-### Older connections
-
-Official release builds (the zips attached to GitHub releases and the store
-versions) contain one built-in address, `https://mcp.kazuhahub.com`, the
-project's original server. It is used only if your browser still holds a
-credential saved by a version before 0.4, which stored no address: syncs and
-uploads then go to that server with that credential, as they did before, until
-you connect again. Nothing is sent there for new installs or 0.4.x connections,
-and builds made from source without `UBC_RELEASE=official` contain no address
-at all.
-
 **Downloads.** Export saves a JSON file to a place you choose. It is a plain,
 unencrypted copy of the data above, and it is yours to keep private.
 
@@ -127,10 +113,10 @@ the MCPHub address and your upload credential; whether automatic sync is on;
 the time and size of the last sync and the last sync error; the state of the
 last connection attempt (while connecting, a random value, expiry time and tab
 number tying the approval tab to the extension; afterwards the address and a
-success or error message); and a credential saved by a version before 0.4, if
-any. Disconnect this browser removes all of these except the MCPHub address,
-which stays to prefill the field. An old credential is no longer used once you
-connect again.
+success or error message). A credential saved by a version before 0.4, which
+stored no address, is never used; it stays until you connect again or click
+Disconnect this browser. Disconnect this browser removes all of these except
+the MCPHub address, which stays to prefill the field.
 
 Captured course data is not written to storage. It is held in memory while it
 is previewed or uploaded, and the script in a Workday tab keeps a copy of what
@@ -155,7 +141,8 @@ operator of the MCPHub you entered. It:
   no time-based expiry;
 - stores unencrypted your MCPHub user name (or, for a connection made through
   OAuth, the issuer and account identifier), a label for the connection, hashes
-  of your credentials and of pending pairing codes with their expiry; an
+  of your credentials and of pending one-time connection codes with their
+  expiry; an
   encrypted copy of your credentials; and, in memory only, recent IP addresses
   for rate limiting.
 
@@ -194,7 +181,7 @@ there. Uninstalling the extension removes its local storage.
 
 The extension downloads no remote code; all its scripts are bundled in the
 package. In Firefox it declares, in Firefox's data consent, that it transmits
-authentication information (the pairing code and upload credential), personally
+authentication information (the one-time code and upload credential), personally
 identifying information (instructor names, and registration records tied to
 your account) and website content (Workday course data).
 

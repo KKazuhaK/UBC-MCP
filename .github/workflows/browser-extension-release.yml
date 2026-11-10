@@ -1,9 +1,8 @@
 name: Browser extension release
 
 # When a release is published (prereleases included: every UBC MCP release so
-# far is one), build UBC Course Capture for Chrome and Firefox as official
-# release builds and attach both zips, the source archive and their checksums
-# to the release. The extension keeps its own version in extension/manifest.json;
+# far is one), build UBC Course Capture for Chrome and Firefox and attach both
+# zips, the source archive and their checksums to the release. The extension keeps its own version in extension/manifest.json;
 # the asset names carry that version, not the release tag.
 #
 # Store submission is opt-in, skips cleanly until configured, and runs only for
@@ -90,8 +89,8 @@ jobs:
           set -euo pipefail
           npm ci --ignore-scripts
           npm test
-          npm run build:extension:release
-          npm run build:firefox:release
+          npm run build:extension
+          npm run build:firefox
       - name: Lint the Firefox build
         run: |
           set -euo pipefail
