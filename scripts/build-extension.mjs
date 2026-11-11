@@ -1,4 +1,4 @@
-import {copyFile} from 'node:fs/promises';
+import {copyFile,cp} from 'node:fs/promises';
 import {build} from 'esbuild';
 await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'esm',target:'chrome120',outfile:'extension/popup.js',legalComments:'none'});
 await build({entryPoints:['src/collector/background.ts'],bundle:true,platform:'browser',format:'esm',target:'chrome120',outfile:'extension/background.js',legalComments:'none'});
@@ -8,3 +8,4 @@ console.log('Built extension popup, background, authorization bridge and Workday
 
 await copyFile('LICENSE','extension/LICENSE.txt');
 await copyFile('node_modules/zod/LICENSE','extension/THIRD_PARTY_NOTICES.txt');
+await cp('src/collector/icons','extension/icons',{recursive:true,force:true,filter:src=>!src.endsWith('.svg')});

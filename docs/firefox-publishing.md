@@ -13,8 +13,9 @@ extension/ directory: Firefox uses background.scripts, while Chrome uses
 background.service_worker. The output contains a root
 manifest, HTML, bundled JavaScript and license notices. No environment file,
 Workday export, user credential or private database is needed for the build.
-Run npx --yes web-ext@10.8.0 lint --source-dir .data/firefox-extension
---warnings-as-errors to repeat validation (0 errors/warnings at preparation).
+Run release/tools/node_modules/.bin/web-ext lint --source-dir .data/firefox-extension
+--warnings-as-errors after npm ci --ignore-scripts in release/tools (web-ext is
+pinned by the lockfile there) to repeat validation (0 errors/warnings at preparation).
 
 The submission ZIP is unsigned. Renaming it to XPI does not sign it or make a
 persistent installation work. Mozilla signing is required. Use the Mozilla
@@ -29,8 +30,10 @@ Reviewable submission information:
 - Name: UBC Course Capture
 - Summary: Preview and sync selected UBC Workday course snapshots to your private MCP connection.
 - Homepage/source: https://github.com/KKazuhaK/UBC-MCP
-- Privacy: docs/extension-privacy.md in the same source repository.
-- Data consent: authenticationInfo and websiteContent, no telemetry.
+- Privacy: https://github.com/KKazuhaK/UBC-MCP/blob/main/docs/extension-privacy.md
+  (Chinese: docs/extension-privacy.zh.md).
+- Data consent: authenticationInfo, personallyIdentifyingInfo (instructor names
+  and the user's own registrations) and websiteContent, no telemetry.
 - Optional HTTPS host permission: the user enters their own MCPHub origin and
   grants access to that origin and UBC Workday; there is no prefilled public server.
 - activeTab/scripting: read a temporary background registration page and supported open course-search pages after the user grants Workday site access.
@@ -54,4 +57,3 @@ verify it survives a browser restart. This acceptance is still outstanding.
 Official references:
 https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/
 https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/
-

@@ -1,0 +1,8 @@
+{
+  "name": "ubc-course-capture-release-tools",
+  "private": true,
+  "description": "Pinned web-ext for linting the Firefox build and submitting it to Firefox Add-ons; installed by CI and the release workflow",
+  "devDependencies": {
+    "web-ext": "10.8.0"
+  }
+}
