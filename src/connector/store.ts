@@ -7,9 +7,24 @@ import type {Snapshot} from '../model.js';
 
 export const normalizeIssuer=(s:string)=>s.endsWith('/')?s.slice(0,-1):s;
 const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
+const DAY=86_400_000;
+/** Snapshots older than staleDays are not served; older than deleteDays they, and revoked bindings, are deleted. */
+export type Retention={staleDays:number;deleteDays:number};
+export const DEFAULT_RETENTION:Retention={staleDays:14,deleteDays:30};
+/** UBC_SNAPSHOT_STALE_DAYS (default 14) and UBC_SNAPSHOT_DELETE_DAYS (default 30). */
+export function retentionFromEnv(env:Record<string,string|undefined>=process.env):Retention {
+  const read=(key:string,fallback:number)=>{
+    const raw=(env[key]??'').trim();if(!raw)return fallback;
+    const n=Number(raw);if(!Number.isFinite(n)||n<=0)throw new Error(`${key} must be a positive number of days`);
+    return n;
+  };
+  const r={staleDays:read('UBC_SNAPSHOT_STALE_DAYS',DEFAULT_RETENTION.staleDays),deleteDays:read('UBC_SNAPSHOT_DELETE_DAYS',DEFAULT_RETENTION.deleteDays)};
+  if(r.staleDays>r.deleteDays)throw new Error('UBC_SNAPSHOT_STALE_DAYS must not exceed UBC_SNAPSHOT_DELETE_DAYS');
+  return r;
+}
 export class Store {
   private db:DatabaseSync; private key:Buffer;
-  constructor(directory:string) {
+  constructor(directory:string,private retention:Retention=DEFAULT_RETENTION,private now:()=>number=Date.now) {
     mkdirSync(directory,{recursive:true,mode:0o700}); chmodSync(directory,0o700);
     const path=join(directory,'connector.sqlite'), keyPath=join(directory,'encryption.key');
     const existing=existsSync(path);
@@ -24,6 +39,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS accounts(username TEXT NOT NULL,issuer_key TEXT NOT NULL DEFAULT '',issuer TEXT,binding_id TEXT NOT NULL REFERENCES bindings(id),credentials TEXT NOT NULL,PRIMARY KEY(username,issuer_key));
       CREATE TABLE IF NOT EXISTS pairing(code_hash TEXT PRIMARY KEY,binding_id TEXT NOT NULL REFERENCES bindings(id),expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS snapshots(binding_id TEXT NOT NULL REFERENCES bindings(id),scope TEXT NOT NULL,captured_at TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(binding_id,scope));`);
+    // Databases from before revoked bindings were purged have no revocation time; their clock starts now.
+    if(!this.db.prepare('PRAGMA table_info(bindings)').all().some(c=>c.name==='revoked_at')) {
+      this.db.exec('ALTER TABLE bindings ADD COLUMN revoked_at INTEGER');
+      this.db.prepare('UPDATE bindings SET revoked_at=? WHERE revoked=1').run(this.now());
+    }
     // Databases from before issuer-bound accounts keyed accounts by username alone.
     if(!this.db.prepare('PRAGMA table_info(accounts)').all().some(c=>c.name==='issuer_key')) {
       this.db.exec('BEGIN IMMEDIATE');
@@ -50,7 +70,7 @@ export class Store {
   revoke(id:string) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.db.prepare('UPDATE bindings SET revoked=1 WHERE id=?').run(id);
+      this.db.prepare('UPDATE bindings SET revoked=1,revoked_at=?,label=\'\' WHERE id=? AND revoked=0').run(this.now(),id);
       this.db.prepare('DELETE FROM snapshots WHERE binding_id=?').run(id);
       this.db.prepare('DELETE FROM pairing WHERE binding_id=?').run(id);
       this.db.prepare('DELETE FROM accounts WHERE binding_id=?').run(id);
@@ -72,13 +92,30 @@ export class Store {
     this.db.prepare('INSERT INTO snapshots VALUES(?,?,?,?) ON CONFLICT(binding_id,scope) DO UPDATE SET captured_at=excluded.captured_at,body=excluded.body').run(id,scope,s.capturedAt,body);
     return {capturedAt:s.capturedAt,sections:s.sections.length};
   }
+  /** Serves only snapshots captured within the stale window; older ones need a new sync. */
   get(id:string):Snapshot[] {
     this.active(id);
-    return this.db.prepare('SELECT scope,body FROM snapshots WHERE binding_id=? ORDER BY scope').all(id).map(row=>{
+    const cutoff=this.now()-this.retention.staleDays*DAY;
+    return this.db.prepare('SELECT scope,body,captured_at FROM snapshots WHERE binding_id=? ORDER BY scope').all(id)
+      .filter(row=>Date.parse(String(row.captured_at))>=cutoff).map(row=>{
       const bytes=Buffer.from(String(row.body),'base64'),decipher=createDecipheriv('aes-256-gcm',this.key,bytes.subarray(0,12));
       decipher.setAAD(Buffer.from(`${id}:${String(row.scope)}`));decipher.setAuthTag(bytes.subarray(12,28));
       return parseSnapshot(JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString('utf8')));
     });
+  }
+  /** Deletes snapshots older than deleteDays and bindings revoked more than deleteDays ago. */
+  purge():{snapshots:number;bindings:number} {
+    const cutoff=this.now()-this.retention.deleteDays*DAY;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      let snapshots=0;
+      for(const row of this.db.prepare('SELECT binding_id,scope,captured_at FROM snapshots').all())
+        if(!(Date.parse(String(row.captured_at))>=cutoff)){this.db.prepare('DELETE FROM snapshots WHERE binding_id=? AND scope=?').run(String(row.binding_id),String(row.scope));snapshots++;}
+      const old=this.db.prepare('SELECT id FROM bindings WHERE revoked=1 AND revoked_at<?').all(cutoff).map(r=>String(r.id));
+      for(const id of old)for(const table of ['snapshots','pairing','accounts'])this.db.prepare(`DELETE FROM ${table} WHERE binding_id=?`).run(id);
+      for(const id of old)this.db.prepare('DELETE FROM bindings WHERE id=?').run(id);
+      this.db.exec('COMMIT');return {snapshots,bindings:old.length};
+    } catch(e) {this.db.exec('ROLLBACK');throw e;}
   }
   private seal(text:string,aad:string) {
     const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',this.key,iv);c.setAAD(Buffer.from(aad));

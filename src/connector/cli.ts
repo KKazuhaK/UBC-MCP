@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {readFile} from 'node:fs/promises';
 import {parseSnapshot} from '../model.js';
-import {Store} from './store.js';
+import {Store,retentionFromEnv} from './store.js';
 import {connectorServer} from './http.js';
 import {adapterFromEnv} from './adapters/index.js';
 import {mcpConfigFromEnv,mcpResource,checkedUrl} from './mcp-http.js';
@@ -27,7 +27,7 @@ try {
     }
     console.log(`${completed} snapshot(s) synchronized. Capture times were preserved.`);
   }else {
-    const store=new Store(directory);
+    const store=new Store(directory,command==='serve'?retentionFromEnv():undefined);
     if(command==='create-binding'){console.log(JSON.stringify(store.create(process.argv[3]??''),null,2));store.close();}
     else if(command==='link-account'){
       const arg=(name:string)=>{const i=process.argv.indexOf(name);return i>0?process.argv[i+1]:undefined;};
@@ -44,8 +44,10 @@ try {
       if(!['127.0.0.1','0.0.0.0'].includes(host))throw new Error('Invalid connector bind address');
       const port=Number(process.env.UBC_CONNECTOR_PORT??8792);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('Invalid port');
       const mcpConfig=mcpConfigFromEnv(),mcp=mcpConfig?mcpResource(store,mcpConfig):null;
+      const cleanup=()=>{try{const r=store.purge();if(r.snapshots||r.bindings)console.error(`Retention cleanup removed ${r.snapshots} snapshot(s) and ${r.bindings} revoked binding(s)`);}catch{console.error('Retention cleanup failed');}};
+      cleanup();const cleanupTimer=setInterval(cleanup,6*3_600_000);cleanupTimer.unref();
       const server=connectorServer(store,adapterFromEnv(store),mcp);server.listen(port,host,()=>console.error(`UBC connector listening on ${host}:${port}${mcp?` (remote MCP resource ${mcp.config.resource})`:''}`));
-      for(const sig of ['SIGINT','SIGTERM']as const)process.on(sig,()=>server.close(()=>{void (mcp?.close()??Promise.resolve()).finally(()=>{store.close();process.exit(0);});}));
+      for(const sig of ['SIGINT','SIGTERM']as const)process.on(sig,()=>{clearInterval(cleanupTimer);server.close(()=>{void (mcp?.close()??Promise.resolve()).finally(()=>{store.close();process.exit(0);});});});
     }else{store.close();throw new Error('Use serve, create-binding <label>, link-account --sub <sub> [--issuer <url>], revoke <id>, or push <file>');}
   }
 }catch(e){console.error(e instanceof Error?e.message:'Connector failed');process.exitCode=1;}

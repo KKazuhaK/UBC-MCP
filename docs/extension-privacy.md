@@ -137,8 +137,9 @@ operator of the MCPHub you entered. It:
   same data directory as its database, so the operator can decrypt them, and a
   backup of that directory holds both the data and the key. The campus,
   academic period, kind and capture time are stored unencrypted next to them;
-- keeps snapshots until a newer one replaces them or you disconnect; there is
-  no time-based expiry;
+- stops serving a snapshot 14 days after it was captured (your AI assistant is
+  told to sync again), and deletes it after 30 days, or earlier if a newer one
+  replaces it or you disconnect. The operator can change both periods;
 - stores unencrypted your MCPHub user name (or, for a connection made through
   OAuth, the issuer and account identifier), a label for the connection, hashes
   of your credentials and of pending one-time connection codes with their
@@ -161,7 +162,8 @@ retention policy.
 **Deleting it.** On the UBC connection page in MCPHub, 断开并删除我的数据
 (Disconnect and delete my data) revokes your credentials and deletes your
 current snapshots and account link from the connector; only a revoked record
-of the connection, with its label and credential hashes, remains. Deleted rows
+of the connection, with its credential hashes and no label, remains for 30
+days so the old credentials stay rejected, and is then deleted. Deleted rows
 can stay in the database file until they are overwritten. Copies already in
 backups, or already sent to an AI client, follow their own retention.
 Disconnect this browser in the extension removes only the credential and
