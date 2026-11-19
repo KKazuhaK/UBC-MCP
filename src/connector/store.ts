@@ -40,10 +40,16 @@ export class Store {
       CREATE TABLE IF NOT EXISTS pairing(code_hash TEXT PRIMARY KEY,binding_id TEXT NOT NULL REFERENCES bindings(id),expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS snapshots(binding_id TEXT NOT NULL REFERENCES bindings(id),scope TEXT NOT NULL,captured_at TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(binding_id,scope));`);
     // Databases from before revoked bindings were purged have no revocation time; their clock starts now.
-    if(!this.db.prepare('PRAGMA table_info(bindings)').all().some(c=>c.name==='revoked_at')) {
-      this.db.exec('ALTER TABLE bindings ADD COLUMN revoked_at INTEGER');
-      this.db.prepare('UPDATE bindings SET revoked_at=? WHERE revoked=1').run(this.now());
-    }
+    // One transaction, and safe if another process added the column first.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if(!this.db.prepare('PRAGMA table_info(bindings)').all().some(c=>c.name==='revoked_at'))
+        this.db.exec('ALTER TABLE bindings ADD COLUMN revoked_at INTEGER');
+      // Also repairs rows left without a time by an interrupted upgrade, and drops labels
+      // that bindings revoked before the upgrade still carry.
+      this.db.prepare("UPDATE bindings SET revoked_at=coalesce(revoked_at,?),label='' WHERE revoked=1 AND (revoked_at IS NULL OR label<>'')").run(this.now());
+      this.db.exec('COMMIT');
+    } catch(e) {this.db.exec('ROLLBACK');throw e;}
     // Databases from before issuer-bound accounts keyed accounts by username alone.
     if(!this.db.prepare('PRAGMA table_info(accounts)').all().some(c=>c.name==='issuer_key')) {
       this.db.exec('BEGIN IMMEDIATE');
@@ -83,7 +89,15 @@ export class Store {
     const scope=JSON.stringify([s.campus,s.academicPeriod.id,s.kind]);
     const old=this.db.prepare('SELECT captured_at FROM snapshots WHERE binding_id=? AND scope=?').get(id,scope);
     if (old&&Date.parse(String(old.captured_at))>=Date.parse(s.capturedAt)) throw new Error('Snapshot is older than or equal to stored observation');
-    const n=Number(this.db.prepare('SELECT count(*) AS n FROM snapshots WHERE binding_id=?').get(id)!.n);
+    const count=()=>Number(this.db.prepare('SELECT count(*) AS n FROM snapshots WHERE binding_id=?').get(id)!.n);
+    // At the limit, stale snapshots (never served) make room for a new period instead of blocking it.
+    if (!old&&count()>=20) {
+      const cutoff=this.now()-this.retention.staleDays*DAY;
+      for (const row of this.db.prepare('SELECT scope,captured_at FROM snapshots WHERE binding_id=?').all(id))
+        if (!(Date.parse(String(row.captured_at))>=cutoff))
+          this.db.prepare('DELETE FROM snapshots WHERE binding_id=? AND scope=?').run(id,String(row.scope));
+    }
+    const n=count();
     if (!old&&n>=20) throw new Error('At most twenty periods may be stored per binding');
     const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',this.key,iv);
     cipher.setAAD(Buffer.from(`${id}:${scope}`));

@@ -119,3 +119,25 @@ test('retention defaults and environment overrides',t=>{
   store.put(a.id,aged(2));assert.equal(store.get(a.id).length,0);assert.deepEqual(store.purge(),{snapshots:0,bindings:0});
   const b=store.create('b');store.put(b.id,aged(4));assert.deepEqual(store.purge(),{snapshots:1,bindings:0});
 });
+test('at the twenty-period limit, stale snapshots make room for a new period',t=>{
+  const {store}=clocked(t),a=store.create('a');
+  for(let i=0;i<20;i++) store.put(a.id,{...aged(15),academicPeriod:{...aged(15).academicPeriod,id:`P${i}`}});
+  assert.equal(store.get(a.id).length,0);
+  store.put(a.id,{...fresh(),academicPeriod:{...fresh().academicPeriod,id:'NEW'}});
+  assert.equal(store.get(a.id).length,1);
+  const b=store.create('b');
+  for(let i=0;i<20;i++) store.put(b.id,{...fresh(),academicPeriod:{...fresh().academicPeriod,id:`Q${i}`}});
+  assert.throws(()=>store.put(b.id,{...fresh(),academicPeriod:{...fresh().academicPeriod,id:'NEW'}}),/twenty/);
+});
+test('upgrade drops labels of bindings revoked before it and repairs a missing revocation time',t=>{
+  const dir=mkdtempSync(join(tmpdir(),'ubc-test-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const first=new Store(dir),a=first.create('Alice laptop'),b=first.create('b');first.revoke(a.id);first.close();
+  const db=new DatabaseSync(join(dir,'connector.sqlite'));
+  db.exec("UPDATE bindings SET label='Alice laptop',revoked_at=NULL WHERE revoked=1");db.close();
+  const clock={now:Date.now()},again=new Store(dir,undefined,()=>clock.now);t.after(()=>again.close());
+  const check=new DatabaseSync(join(dir,'connector.sqlite'));
+  try{assert.equal(check.prepare('SELECT label FROM bindings WHERE id=?').get(a.id).label,'');
+    assert.ok(check.prepare('SELECT revoked_at FROM bindings WHERE id=?').get(a.id).revoked_at);
+    assert.equal(check.prepare('SELECT label FROM bindings WHERE id=?').get(b.id).label,'b');}finally{check.close();}
+  clock.now+=31*DAYS;assert.deepEqual(again.purge(),{snapshots:0,bindings:1});
+});
