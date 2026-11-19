@@ -237,8 +237,10 @@ test('legacy (issuer-less) platform accounts match only when the issuer is the p
   const rec=await setup(t,{over:()=>({platformUrl:null})});legacy(rec.store,'lee');rec.store.recordIssuer('lee',rec.issuer.url+'/');
   const c4=await client(rec.url,await rec.mint('lee'));t.after(()=>c4.close());
   assert.equal(data(await c4.callTool({name:'search_sections',arguments:args})).sections[0].title,'LEGACY-TITLE');
-  rec.store.recordIssuer('lee','https://elsewhere.example');
-  assert.equal(JSON.parse(text(await c4.callTool({name:'search_sections',arguments:args}))).error,'CONNECTION_REVOKED');
+  // The first match moved the account to the issuer-bound key; one recorded for another issuer is never matched.
+  const other=await setup(t,{over:()=>({platformUrl:null})});legacy(other.store,'lee');other.store.recordIssuer('lee','https://elsewhere.example');
+  const c5=await client(other.url,await other.mint('lee'));t.after(()=>c5.close());
+  assert.equal(JSON.parse(text(await c5.callTool({name:'search_sections',arguments:args}))).error,'CONNECTION_REVOKED');
 });
 test('link-account creates an issuer-bound account and prints an upload token',async t=>{
   const s=await setup(t),dir=mkdtempSync(join(tmpdir(),'ubc-link-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));

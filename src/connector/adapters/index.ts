@@ -37,8 +37,8 @@ const KNOWN=['mcphub','mcphub-oauth'];
  *         Requires UBC_PLATFORM_URL, UBC_PUBLIC_ORIGIN (https, or http on loopback),
  *         UBC_OAUTH_CLIENT_ID and UBC_SESSION_SECRET (at least 32 bytes);
  *         optional UBC_OAUTH_CLIENT_SECRET and UBC_PLATFORM_SERVER_NAME.
- *         With UBC_MCP_HTTP=on it only signs users in (no credential scope, no
- *         write to the platform) and keys accounts by UBC_OAUTH_ISSUER and
+ *         With UBC_MCP_HTTP=on it only signs users in (a token for the MCP resource,
+ *         verified offline; no credential scope, no write to the platform) and keys accounts by UBC_OAUTH_ISSUER and
  *         UBC_OAUTH_SUBJECT_CLAIM, like the remote MCP endpoint.
  */
 export function adapterFromEnv(store:Store,env:AdapterEnv=process.env,warn:(message:string)=>void=m=>console.error(m)):PlatformAdapter|null {
@@ -57,7 +57,7 @@ export function adapterFromEnv(store:Store,env:AdapterEnv=process.env,warn:(mess
     const secret=env.UBC_OAUTH_CLIENT_SECRET;
     // With the remote MCP endpoint on, the platform reaches the connector through it, so this adapter only signs users in.
     const mcp=mcpConfigFromEnv(env);
-    return mcphubOAuthAdapter(store,{origin:need('UBC_PUBLIC_ORIGIN'),platformUrl:need('UBC_PLATFORM_URL'),clientId:need('UBC_OAUTH_CLIENT_ID'),sessionSecret:need('UBC_SESSION_SECRET'),...(secret?{clientSecret:secret}:{}),...(mcp?{signInOnly:true,issuer:mcp.issuer,subjectClaim:mcp.subjectClaim}:{}),...(env.UBC_PLATFORM_SERVER_NAME?{serverName:env.UBC_PLATFORM_SERVER_NAME}:{}),warn});
+    return mcphubOAuthAdapter(store,{origin:need('UBC_PUBLIC_ORIGIN'),platformUrl:need('UBC_PLATFORM_URL'),clientId:need('UBC_OAUTH_CLIENT_ID'),sessionSecret:need('UBC_SESSION_SECRET'),...(secret?{clientSecret:secret}:{}),...(mcp?{signInOnly:true,issuer:mcp.issuer,subjectClaim:mcp.subjectClaim,resource:mcp.resource,audience:mcp.audience,requireAtJwt:mcp.requireAtJwt}:{}),...(env.UBC_PLATFORM_SERVER_NAME?{serverName:env.UBC_PLATFORM_SERVER_NAME}:{}),warn});
   }
   const origin=env.UBC_PUBLIC_ORIGIN;
   if(!origin)throw new Error('UBC_PLATFORM_ADAPTER=mcphub requires UBC_PUBLIC_ORIGIN');

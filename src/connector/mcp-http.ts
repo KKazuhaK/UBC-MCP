@@ -281,11 +281,9 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
       return sendJson(res,401,{error:'invalid_token'},{'WWW-Authenticate':challenge(true)});
     }
     if(!hit(subjects,`${auth.iss}\n${auth.subject}`,600))return sendJson(res,429,{error:'RATE_LIMITED'},{'Retry-After':'60'});
-    // First sight of a stable subject: carry over the account this user had under the old username key, if it is unambiguous.
-    if(config.subjectClaim!=='sub') {
-      try{await store.adopt(auth.iss,config.subjectClaim,auth.subject,auth.sub,legacyAllowed);}
-      catch{logLimited('adopt','MCP: moving an account to its stable key failed');}
-    }
+    // First sight of a subject: carry over the account this user had under the old username key, if it is unambiguous.
+    try{await store.adopt(auth.iss,config.subjectClaim,auth.subject,auth.sub,legacyAllowed);}
+    catch{logLimited('adopt','MCP: moving an account to its stable key failed');}
     let body:Buffer|undefined;
     if(req.method==='POST') {
       if(Number(req.headers['content-length']??0)>MAX_BODY){req.resume();return sendJson(res,413,{error:'PAYLOAD_TOO_LARGE'});}

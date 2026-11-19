@@ -76,17 +76,30 @@ those belong to MCPHub. The connector must not be reachable except through the p
 MCPHub configuration:
 
 - `oauthServer.externalResources`: an entry for `https://mcp.kazuhahub.com/ubc/mcp` with
-  `skipConsentForPersonalConnection: true`, so users are not asked to approve it.
+  `skipConsentForPersonalConnection: true`, so users are not asked to approve it. List no scopes
+  (the connector needs none), and list the connector's OAuth client in `allowedClients`: the id
+  behind `UBC_OAUTH_CLIENT_ID`, or its URL if it is a CIMD client. Without that, the sign-in is
+  refused.
 - the `ubc-personal` server entry: type `streamable-http`, url
   `https://mcp.kazuhahub.com/ubc/mcp`, `oauth.identityMode: personal`. Remove the
   `env.UBC_CONNECTOR_TOKEN` slot. MCPHub must issue the stable `mcphub_uid` claim in these tokens.
 
-In this mode the connection page only signs the user in with MCPHub. It requests no
-`credentials:write` scope and never writes to MCPHub's credential API, so MCPHub holds no
-READ token for UBC. The page, the extension pairing and `/mcp` all use the account keyed by
+In this mode the connection page only signs the user in with MCPHub. It asks for a token
+for the connector's own resource and checks it offline; it requests no `credentials:write`
+scope, never calls userinfo and never writes to MCPHub's credential API, so MCPHub holds no
+READ token for UBC and the connector gets no general MCPHub token. The page, the extension pairing and `/mcp` all use the account keyed by
 `mcphub_uid`. An older account stored under the MCPHub username moves to the uid at the
 first sign-in or first `/mcp` request, if it was created through the same issuer. If an
 account for that uid already exists, nothing is merged.
+
+Switch to `mcphub_uid` before deleting or re-creating any MCPHub user: until an account has
+been seen once under its uid, the connector cannot tell a reused username from the original
+person.
+
+If you already set `UBC_MCP_RESOURCE` to a path other than `/mcp`, note the changes: the endpoint
+is now served at that path, a resource without a path is refused at startup, and the root
+`/.well-known/oauth-protected-resource` document is no longer served (only the path form is).
+Update the proxy rules to match.
 
 Acceptance: sign in on `/ubc/` as user A and user B; pair the extension and sync different
 data for each; check from MCPHub that each sees only their own data; revoke A on the page and

@@ -1,12 +1,16 @@
 import {createHash,createHmac,hkdfSync,randomBytes,timingSafeEqual} from 'node:crypto';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {normalizeIssuer} from '../store.js';
+import {createTokenVerifier,IssuerUnavailable,TokenInvalid} from '../mcp-http.js';
+import type {TokenVerifier} from '../mcp-http.js';
 import type {Store} from '../store.js';
 import type {PlatformAdapter} from './index.js';
 import {page,script} from './mcphub-oauth-web.js';
 import {handleClaim,PAGE_HEADERS,SERVER_NAME} from './shared.js';
 
-export type McphubOAuthConfig={origin:string;platformUrl:string;clientId:string;clientSecret?:string;sessionSecret:string;/** Sign users in only: no credential scope and no calls to the platform's credential API. Requires `issuer`. */signInOnly?:boolean;/** The issuer the remote MCP endpoint trusts; sign-in accounts are keyed to it. */issuer?:string;/** Userinfo claim that names the account (default `sub`). */subjectClaim?:string;serverName?:string;warn?:(message:string)=>void;log?:(message:string)=>void};
+export type McphubOAuthConfig={origin:string;platformUrl:string;clientId:string;clientSecret?:string;sessionSecret:string;/** Sign users in only: no credential scope and no calls to the platform's credential API. Requires `issuer`. */signInOnly?:boolean;/** The issuer the remote MCP endpoint trusts; sign-in accounts are keyed to it. */issuer?:string;/** Claim that names the account (default `sub`). */subjectClaim?:string;
+  /** Sign-in-only: the connector's MCP resource identifier. The sign-in token is requested for it (RFC 8707) and verified offline like an /mcp token. */resource?:string;audience?:string;requireAtJwt?:boolean;
+  /** Test hook: replaces the offline token verifier. */verifier?:TokenVerifier;serverName?:string;warn?:(message:string)=>void;log?:(message:string)=>void};
 type Send=(status:number,value:unknown)=>void;
 type Intent='connect'|'disconnect';
 type Discovery={issuer:string|null;authorize:URL;token:URL;userinfo:URL;basicAuth:boolean};
@@ -52,8 +56,9 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
   const serverName=config.serverName??'ubc-personal',signInOnly=config.signInOnly===true,claim=config.subjectClaim??'sub';
   // Sign-in-only mode asks for no credential scope: the access token proves who the user is and is then dropped.
   const scope=signInOnly?'':`credentials:write:${serverName}`;
-  if(signInOnly&&!config.issuer)throw new Error('Sign-in-only mode requires the issuer');
-  const issuer=config.issuer??'';
+  if(signInOnly&&(!config.issuer||!config.resource))throw new Error('Sign-in-only mode requires the issuer and the resource');
+  const issuer=config.issuer??'',resource=config.resource??'';
+  const verify=config.verifier??(signInOnly?createTokenVerifier({issuer,audience:config.audience??resource,requireAtJwt:config.requireAtJwt??true,subjectClaim:claim}):null);
   // Accounts of the sign-in-only mode are linked to the issuer and claim, exactly like the remote MCP endpoint's.
   const findAccount=(subject:string,create=false)=>signInOnly?store.linkedAccount(issuer,subject,create,claim):store.account(subject,create);
   if(!SERVER_NAME.test(serverName))throw new Error('Invalid platform server name');
@@ -114,7 +119,7 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
     }catch{fail('discovery');throw new FlowError('UPSTREAM');}
   }
   async function exchange(d:Discovery,code:string,verifier:string):Promise<string> {
-    const body=new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:redirectUri,code_verifier:verifier});
+    const body=new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:redirectUri,code_verifier:verifier,...(signInOnly?{resource}:{})});
     const headers:Record<string,string>={'Content-Type':'application/x-www-form-urlencoded',Accept:'application/json'};
     if(config.clientSecret&&d.basicAuth)headers.Authorization='Basic '+Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(config.clientSecret)}`).toString('base64');
     else {body.set('client_id',clientId);if(config.clientSecret)body.set('client_secret',config.clientSecret);}
@@ -136,6 +141,12 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
       if(typeof subject!=='string'||!subject||subject.length>256||/[\x00-\x1f\x7f]/.test(subject)){fail('userinfo');throw new FlowError('UPSTREAM');}
       return {username:u.sub,subject};
     }catch(e){if(e instanceof FlowError)throw e;fail('userinfo');throw new FlowError('UPSTREAM');}
+  }
+  // Sign-in-only: the token was issued for the connector's own resource, so it is verified offline (issuer, audience, type,
+  // algorithm, expiry) exactly like an /mcp token, and the account claim is read from it. MCPHub's userinfo is not called.
+  async function tokenIdentity(token:string):Promise<{username:string;subject:string}> {
+    try{const v=await verify!(token);return {username:v.sub,subject:v.subject};}
+    catch(e){fail(e instanceof TokenInvalid||e instanceof IssuerUnavailable?`token check (${e.reason})`:'token check');throw new FlowError('UPSTREAM');}
   }
   async function credential(token:string,method:'PUT'|'DELETE',values?:Record<string,string>):Promise<void> {
     const url=`${hubBase}/api/credentials/${encodeURIComponent(serverName)}`;
@@ -162,7 +173,7 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
     const state=b64(randomBytes(32)),verifier=b64(randomBytes(32));
     const tx:Tx={s:state,v:verifier,i:intent,e:Date.now()+TX_TTL,...extra};
     const url=new URL(d.authorize);
-    for(const [k,v] of Object.entries({response_type:'code',client_id:clientId,redirect_uri:redirectUri,...(scope?{scope}:{}),state,code_challenge:b64(createHash('sha256').update(verifier).digest()),code_challenge_method:'S256'}))url.searchParams.set(k,v);
+    for(const [k,v] of Object.entries({response_type:'code',client_id:clientId,redirect_uri:redirectUri,...(scope?{scope}:{}),...(signInOnly?{resource}:{}),state,code_challenge:b64(createHash('sha256').update(verifier).digest()),code_challenge_method:'S256'}))url.searchParams.set(k,v);
     return {url:url.href,cookie:setCookie(TX_COOKIE,sign(TX_COOKIE,tx),TX_TTL/1000)};
   }
   // State-changing requests: same-origin, JSON, a live connector session and its CSRF token.
@@ -197,11 +208,14 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
         log(`mcphub-oauth: authorization refused (${known})`);
         throw new FlowError(known==='access_denied'?'DENIED':'REFUSED',403);
       }
+      // RFC 9207: when the response names its issuer it must be the one we trust.
+      const responseIssuer=url.searchParams.get('iss');
+      if(signInOnly&&responseIssuer!==null&&normalizeIssuer(responseIssuer)!==normalizeIssuer(issuer)){fail('issuer check');throw new FlowError('STATE',400);}
       const code=url.searchParams.get('code');
       if(!code||code.length>2048)throw new FlowError('STATE',400);
       const disconnect=tx.i==='disconnect',current=disconnect?session(req):null;
       if(disconnect&&(!current||current.u!==tx.u))throw new FlowError('SESSION',401);
-      const d=await discover(),token=await exchange(d,code,tx.v),{username,subject}=await identity(d,token);
+      const d=await discover(),token=await exchange(d,code,tx.v),{username,subject}=signInOnly?await tokenIdentity(token):await identity(d,token);
       // The platform that signs users in must be the issuer the MCP endpoint trusts, or the two would key accounts differently.
       if(signInOnly&&(!d.issuer||normalizeIssuer(d.issuer)!==normalizeIssuer(issuer))){fail('issuer check');throw new FlowError('UPSTREAM');}
       if(disconnect) {

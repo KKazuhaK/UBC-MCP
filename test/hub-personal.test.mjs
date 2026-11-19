@@ -172,25 +172,28 @@ test('store: pair and claim work for linked accounts',async t=>{
 
 // ---- the sign-in-only adapter -----------------------------------------------
 async function fakeHub(t,users) {
-  const hub={requests:[],codes:new Map(),tokens:new Map(),user:'alice',n:0};
+  const {publicKey,privateKey}=await generateKeyPair('ES256'),jwk={...await exportJWK(publicKey),kid:'k1',alg:'ES256',use:'sig'};
+  const hub={requests:[],codes:new Map(),tokens:new Map(),user:'alice',n:0,tokenOver:{},authorizeIss:null};
   const server=createServer(async(req,res)=>{
     const url=new URL(req.url,'http://x');let raw='';for await(const c of req)raw+=c;
     hub.requests.push({method:req.method,path:url.pathname,search:url.search,headers:{...req.headers}});
     const json=(status,value)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};
     const base=`http://127.0.0.1:${server.address().port}`;
-    if(url.pathname==='/.well-known/oauth-authorization-server')return json(200,{issuer:hub.issuer??base,authorization_endpoint:base+'/oauth/authorize',token_endpoint:base+'/oauth/token',userinfo_endpoint:base+'/oauth/userinfo',token_endpoint_auth_methods_supported:['none']});
+    if(url.pathname==='/.well-known/oauth-authorization-server')return json(200,{issuer:hub.issuer??base,authorization_endpoint:base+'/oauth/authorize',token_endpoint:base+'/oauth/token',userinfo_endpoint:base+'/oauth/userinfo',jwks_uri:base+'/jwks',token_endpoint_auth_methods_supported:['none']});
+    if(url.pathname==='/jwks')return json(200,{keys:[jwk]});
     if(url.pathname==='/oauth/authorize'){
-      const code='code-'+(++hub.n);hub.codes.set(code,{user:hub.user,challenge:url.searchParams.get('code_challenge')});
-      res.writeHead(302,{Location:`${url.searchParams.get('redirect_uri')}?code=${code}&state=${encodeURIComponent(url.searchParams.get('state'))}`});return res.end();
+      const code='code-'+(++hub.n);hub.codes.set(code,{user:hub.user,challenge:url.searchParams.get('code_challenge'),resource:url.searchParams.get('resource')});
+      const iss=hub.authorizeIss===null?'':`&iss=${encodeURIComponent(hub.authorizeIss)}`;
+      res.writeHead(302,{Location:`${url.searchParams.get('redirect_uri')}?code=${code}&state=${encodeURIComponent(url.searchParams.get('state'))}${iss}`});return res.end();
     }
     if(url.pathname==='/oauth/token'){
       const f=new URLSearchParams(raw),entry=hub.codes.get(f.get('code'));hub.codes.delete(f.get('code'));
       if(!entry||b64(createHash('sha256').update(f.get('code_verifier')??'').digest())!==entry.challenge)return json(400,{error:'invalid_grant'});
-      const token=`at-${entry.user}-${++hub.n}`;hub.tokens.set(token,entry.user);return json(200,{access_token:token,token_type:'Bearer'});
+      hub.tokenResource=f.get('resource');
+      const o={iss:hub.url,aud:entry.resource??'',typ:'at+jwt',...hub.tokenOver},u=users[entry.user];
+      const jwt=await new SignJWT({scope:'',...(u?{[CLAIM]:u}:{})}).setProtectedHeader({alg:'ES256',typ:o.typ,kid:'k1'}).setSubject(entry.user).setIssuedAt().setIssuer(o.iss).setAudience(o.aud).setExpirationTime(now()+300).sign(privateKey);
+      return json(200,{access_token:jwt,token_type:'Bearer'});
     }
-    const user=hub.tokens.get(/^Bearer (.+)$/.exec(req.headers.authorization??'')?.[1]);
-    if(!user)return json(401,{});
-    if(url.pathname==='/oauth/userinfo'){const u=users[user];return json(200,{sub:user,username:user,...(u?{[CLAIM]:u}:{})});}
     json(404,{});
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>{server.closeAllConnections();server.close(r);}));
@@ -200,7 +203,7 @@ async function adapterSetup(t,{users={alice:'u-alice',bob:'u-bob'},viaEnv=false,
   const store=new Store(tmp(t)),hub=await fakeHub(t,users),port=await freePort(),origin=`http://127.0.0.1:${port}`;
   const adapter=viaEnv
     ?adapterFromEnv(store,{UBC_MCP_HTTP:'on',UBC_PUBLIC_ORIGIN:origin,UBC_OAUTH_ISSUER:hub.url,UBC_MCP_RESOURCE:origin+'/ubc/mcp',UBC_OAUTH_SUBJECT_CLAIM:CLAIM,UBC_PLATFORM_ADAPTER:'mcphub-oauth',UBC_PLATFORM_URL:hub.url,UBC_OAUTH_CLIENT_ID:'ubc',UBC_SESSION_SECRET:SECRET},()=>{})
-    :mcphubOAuthAdapter(store,{origin,platformUrl:hub.url,clientId:'ubc',sessionSecret:SECRET,signInOnly:true,issuer:hub.url,subjectClaim:CLAIM,log:()=>{},...config});
+    :mcphubOAuthAdapter(store,{origin,platformUrl:hub.url,clientId:'ubc',sessionSecret:SECRET,signInOnly:true,issuer:hub.url,resource:origin+'/ubc/mcp',subjectClaim:CLAIM,log:()=>{},...config});
   const server=connectorServer(store,adapter);await new Promise(r=>server.listen(port,'127.0.0.1',r));
   t.after(async()=>{await new Promise(r=>{server.closeAllConnections();server.close(r);});store.close();});
   const jar=new Map();
@@ -218,7 +221,11 @@ test('sign-in-only adapter: no credential scope or call, account keyed by the st
   const {store,hub,origin,issuer,req,flow,status}=await adapterSetup(t);
   const done=await flow();assert.equal(done.status,302);assert.equal(done.headers.get('location'),'/ubc/?connected=1');
   const authorize=hub.requests.find(r=>r.path==='/oauth/authorize');
-  assert.ok(!new URLSearchParams(authorize.search).has('scope'));assert.ok(!authorize.search.includes('credentials'));
+  const ap=new URLSearchParams(authorize.search);
+  assert.ok(!ap.has('scope'));assert.ok(!authorize.search.includes('credentials'));
+  // The sign-in token is asked for the connector's own resource (RFC 8707), at authorize and at the token endpoint.
+  assert.equal(ap.get('resource'),origin+'/ubc/mcp');assert.equal(hub.tokenResource,origin+'/ubc/mcp');
+  assert.ok(!hub.requests.some(r=>r.path==='/oauth/userinfo'));
   assert.ok(!hub.requests.some(r=>r.path.startsWith('/api/credentials')||['PUT','DELETE'].includes(r.method)));
   const account=store.linkedAccount(issuer,'u-alice',false,CLAIM);assert.ok(account);
   assert.equal(store.account('alice'),null);                                    // not keyed by username
@@ -247,6 +254,36 @@ test('sign-in-only adapter adopts the old username account at sign-in, never mer
   assert.equal((await flow()).status,302);
   assert.equal(store.linkedAccount(issuer,'u-alice',false,CLAIM).id,old.id);assert.equal(store.account('alice'),null);
   assert.equal((await status()).scopes.length,1);
+});
+
+test('sign-in-only adapter: a token that fails offline verification, or a foreign RFC 9207 iss, signs nobody in',async t=>{
+  for(const [name,set] of [['wrong audience',h=>{h.tokenOver={aud:'https://other.example.test/mcp'};}],['wrong issuer',h=>{h.tokenOver={iss:'https://evil.example.test'};}],
+    ['wrong typ',h=>{h.tokenOver={typ:'JWT'};}],['foreign iss parameter',h=>{h.authorizeIss='https://evil.example.test';}]]) {
+    const x=await adapterSetup(t);set(x.hub);
+    assert.notEqual((await x.flow()).status,302,name);assert.equal((await x.status()).authenticated,false,name);
+    assert.equal(x.store.linkedAccount(x.issuer,'u-alice',false,CLAIM),null,name);
+    if(name==='foreign iss parameter')assert.ok(!x.hub.requests.some(r=>r.path==='/oauth/token'),'no code exchange');
+  }
+  const ok=await adapterSetup(t);ok.hub.authorizeIss=ok.hub.url+'/';
+  assert.equal((await ok.flow()).status,302);
+});
+
+test('claim sub with the MCP endpoint on: sign-in adopts the username account instead of creating an empty one',async t=>{
+  const {store,issuer,flow,status}=await adapterSetup(t,{config:{subjectClaim:'sub'}});
+  const old=store.account('alice',true),at=new Date().toISOString();
+  store.put(old.id,snapshot({capturedAt:at,sections:[section({observedAt:at})]}));
+  assert.equal((await flow()).status,302);
+  assert.equal(store.linkedAccount(issuer,'alice',false).id,old.id);assert.equal(store.account('alice'),null);
+  assert.equal((await status()).scopes.length,1);
+});
+
+test('claim sub: /mcp adopts the username-keyed account of the same issuer, not one recorded for another',async t=>{
+  const s=await mcpSetup(t);
+  const a=s.store.account('alice',true);seed(s.store,a,'ALICE');s.store.recordIssuer('alice',s.issuer.url);
+  const c=s.store.account('carol',true);seed(s.store,c,'CAROL');s.store.recordIssuer('carol','https://other.example.test');
+  assert.equal(connectedOf(await s.status(await s.mint())),true);
+  assert.equal(s.store.account('alice'),null);assert.equal(s.store.linkedAccount(s.issuer.url,'alice',false).id,a.id);
+  assert.equal(connectedOf(await s.status(await s.mint({},{sub:'carol'}))),false);assert.equal(s.store.account('carol').id,c.id);
 });
 
 test('sign-in-only adapter: userinfo without the claim, or from another issuer, signs nobody in',async t=>{

@@ -191,14 +191,15 @@ export class Store {
   }
   /**
    * Moves an active username-keyed platform account to the key of a stable
-   * subject (for example MCPHub's user id), the first time that subject is seen.
+   * subject (for example MCPHub's user id), the first time that subject is seen (with the claim `sub` the subject is the username and the account just gains its issuer key).
    * It acts only when the account's recorded issuer is this issuer, or for an
    * account with no recorded issuer when `legacyAllowed` confirms the issuer is
    * the platform's own authority. If an account for the subject already exists
    * nothing is moved or merged. Returns whether an account was moved.
    */
   async adopt(iss:string,claim:string,subject:string,username:string,legacyAllowed:()=>Promise<boolean>):Promise<boolean> {
-    if(claim==='sub'||subject===username)return false;
+    // With the plain `sub` claim the subject is the username itself; only the issuer binding is added.
+    if(claim==='sub'&&subject!==username)return false;
     const issuer=normalizeIssuer(iss),key=issuerKey(issuer,claim);
     const exists=()=>!!this.db.prepare('SELECT 1 FROM accounts WHERE username=? AND issuer_key=?').get(subject,key);
     const old=()=>this.db.prepare("SELECT a.binding_id,a.credentials,a.issuer FROM accounts a JOIN bindings b ON b.id=a.binding_id WHERE a.username=? AND a.issuer_key='' AND b.revoked=0").get(username);

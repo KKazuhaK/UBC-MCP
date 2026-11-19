@@ -326,12 +326,25 @@ forwards `/ubc/` (the connection page and extension pairing), `/ubc/mcp`, `/v1/s
 `/.well-known/oauth-protected-resource/ubc/mcp` to the connector; the other `/.well-known/` documents stay with MCPHub. See
 [deploy/mcphub/README.md](deploy/mcphub/README.md).
 
-With `UBC_MCP_HTTP=on`, the `mcphub-oauth` adapter only signs users in. It asks for no `credentials:write` scope and
-never calls MCPHub's `/api/credentials`, so no READ token is stored in MCPHub. It reads the same claim from MCPHub's
-userinfo, so the connection page, the extension and `/mcp` all use the same account. The first time an account is
-seen under its uid, an older account stored under the MCPHub username moves to the uid, but only if it was created
-through the same issuer, and never if an account for that uid already exists. Without `UBC_MCP_HTTP=on`, nothing about
-the adapter changes (see below).
+With `UBC_MCP_HTTP=on`, the `mcphub-oauth` adapter only signs users in. It asks MCPHub for a token for the connector's own
+resource (the RFC 8707 `resource` parameter, no scope), checks that token offline the same way `/mcp` does (issuer,
+audience, type, algorithm, expiry) and reads the account claim from it. It does not call userinfo, asks for no
+`credentials:write` scope and never calls MCPHub's `/api/credentials`, so no READ token is stored in MCPHub and the
+sign-in does not give the connector a general MCPHub token. If MCPHub sends the RFC 9207 `iss` parameter, it must equal
+`UBC_OAUTH_ISSUER`. The connection page, the extension and `/mcp` all use the same account. The first time an account is
+seen under its key, an older account stored under the MCPHub username moves to it (with the claim `sub` too), but only if
+it was created through the same issuer, and never if an account for that key already exists. Without `UBC_MCP_HTTP=on`,
+nothing about the adapter changes (see below).
+
+In MCPHub, the `externalResources` entry for the connector must list the connector's OAuth client in `allowedClients`
+(the client id registered for `UBC_OAUTH_CLIENT_ID`; a client identified by a URL, as with CIMD, must be listed by that
+URL). With no scopes listed on the entry, the sign-in token carries none, which is all the connector needs.
+
+**Changed behaviour for custom `UBC_MCP_RESOURCE` setups.** The endpoint is now served at the path of `UBC_MCP_RESOURCE`
+instead of always at `/mcp`; a resource with no path is refused at startup; the `resource_metadata` in the 401 challenge
+points to `/.well-known/oauth-protected-resource<path>`; and the root metadata document is no longer served unless the
+path is `/mcp`. If you set `UBC_MCP_RESOURCE` to a URL whose path is not `/mcp` (for example because a proxy rewrites the
+path), point the proxy at the resource path, or change the resource, and update the proxy rules for the metadata path.
 
 The standalone setup above and the stdio server are unchanged.
 
