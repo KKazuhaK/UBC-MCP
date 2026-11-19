@@ -119,6 +119,34 @@ not served; the tools tell the user to sync again. `serve` deletes snapshots and
 revoked bindings older than `UBC_SNAPSHOT_DELETE_DAYS` (default 30) at startup
 and every 6 hours. The stale value must not exceed the delete value.
 
+### Readiness endpoint
+
+`GET /v1/readiness` tells a platform (for example MCPHub) whether a user's connection actually works, not just that a
+token is bound. Authenticate with the binding's READ token as `Authorization: Bearer ...`; the UPLOAD token, a missing,
+unknown or revoked token all return `401 {"error":"UNAUTHORIZED"}`. It is read-only, takes no browser origin, and
+returns only a state and a coarse age, never tokens, snapshots or course data (service readiness contract, version 1).
+
+```json
+{"version":1,"state":"degraded","summary":"Course data last updated 9 days ago — open the companion to refresh.","checked_at":"2026-11-19T10:00:00.000Z"}
+```
+
+| State | When | `action` |
+| --- | --- | --- |
+| `needs_setup` | The binding has never uploaded a snapshot | Install the UBC browser companion |
+| `ready` | The newest snapshot is within the serve window and newer than `UBC_READINESS_STALE_DAYS` | none |
+| `degraded` | Still served, but older than `UBC_READINESS_STALE_DAYS` | Open the UBC companion |
+| `expired` | The binding uploaded before, but nothing is served any more (older than `UBC_SNAPSHOT_STALE_DAYS`, or purged) | Open the UBC companion |
+
+The binding's last upload time is stored on the binding and kept when snapshots are purged, which is how `expired`
+differs from `needs_setup`. Bindings whose snapshots were already purged before this version have no upload time to
+recover, so they read `needs_setup` until their next upload. Every `action.url` is `UBC_COMPANION_INSTALL_URL`. `expires_at` is never sent because the
+connector's tokens do not expire; a revoked binding is a `401`. The endpoint has its own limits, separate from the snapshot API's: 60 requests a minute per binding after authentication, and 60 failed authentications a minute per client (IPv6 clients are grouped by /64, IPv4-mapped addresses count as IPv4). Valid tokens are never blocked by the failure limit, and there is no per-IP cap before authentication, so flood protection belongs to the reverse proxy.
+
+| Variable | Meaning |
+| --- | --- |
+| `UBC_READINESS_STALE_DAYS` | Whole days after which the state is `degraded`. Default `min(7, UBC_SNAPSHOT_STALE_DAYS)`; when set it must not exceed `UBC_SNAPSHOT_STALE_DAYS`, the age at which snapshots stop being served. |
+| `UBC_COMPANION_INSTALL_URL` | https URL of the `needs_setup` action. Default: the [Browser stores](#browser-stores) section of this README. |
+
 ## Browser stores
 
 The extension (0.4.x) is built for Chrome, Edge and Firefox 142+. Each release

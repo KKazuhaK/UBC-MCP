@@ -35,7 +35,7 @@ export class Store {
     this.key=readFileSync(keyPath); if (this.key.length!==32) throw new Error('Invalid encryption key');
     chmodSync(keyPath,0o600);
     this.db=new DatabaseSync(path); chmodSync(path,0o600);
-    this.db.exec(`PRAGMA journal_mode=WAL;
+    this.db.exec(`PRAGMA busy_timeout=5000;PRAGMA journal_mode=WAL;
       PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS bindings(id TEXT PRIMARY KEY,label TEXT NOT NULL,read_hash TEXT UNIQUE NOT NULL,upload_hash TEXT UNIQUE NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS accounts(username TEXT NOT NULL,issuer_key TEXT NOT NULL DEFAULT '',issuer TEXT,binding_id TEXT NOT NULL REFERENCES bindings(id),credentials TEXT NOT NULL,PRIMARY KEY(username,issuer_key));
@@ -47,6 +47,17 @@ export class Store {
     try {
       if(!this.db.prepare('PRAGMA table_info(bindings)').all().some(c=>c.name==='revoked_at'))
         this.db.exec('ALTER TABLE bindings ADD COLUMN revoked_at INTEGER');
+      // Per-binding upload time, kept when snapshots are purged so "never uploaded" stays distinguishable from "expired".
+      // Existing rows are backfilled once, from their newest stored snapshot. Same transaction as above, so concurrent openers cannot both ALTER.
+      if(!this.db.prepare('PRAGMA table_info(bindings)').all().some(c=>c.name==='last_uploaded_at')) {
+        this.db.exec('ALTER TABLE bindings ADD COLUMN last_uploaded_at INTEGER');
+        const newest=new Map<string,number>();
+        for(const row of this.db.prepare('SELECT binding_id,captured_at FROM snapshots').all()) {
+          const ms=Date.parse(String(row.captured_at)),id=String(row.binding_id);
+          if(Number.isFinite(ms)&&ms>(newest.get(id)??-Infinity))newest.set(id,ms);
+        }
+        for(const [id,ms]of newest)this.db.prepare('UPDATE bindings SET last_uploaded_at=? WHERE id=?').run(ms,id);
+      }
       // Also repairs rows left without a time by an interrupted upgrade, and drops labels
       // that bindings revoked before the upgrade still carry.
       this.db.prepare("UPDATE bindings SET revoked_at=coalesce(revoked_at,?),label='' WHERE revoked=1 AND (revoked_at IS NULL OR label<>'')").run(this.now());
@@ -106,6 +117,7 @@ export class Store {
     const encrypted=Buffer.concat([cipher.update(JSON.stringify(s),'utf8'),cipher.final()]);
     const body=Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64');
     this.db.prepare('INSERT INTO snapshots VALUES(?,?,?,?) ON CONFLICT(binding_id,scope) DO UPDATE SET captured_at=excluded.captured_at,body=excluded.body').run(id,scope,s.capturedAt,body);
+    this.db.prepare('UPDATE bindings SET last_uploaded_at=? WHERE id=?').run(this.now(),id);
     return {capturedAt:s.capturedAt,sections:s.sections.length};
   }
   /** Serves only snapshots captured within the stale window; older ones need a new sync. */
@@ -118,6 +130,23 @@ export class Store {
       decipher.setAAD(Buffer.from(`${id}:${String(row.scope)}`));decipher.setAuthTag(bytes.subarray(12,28));
       return parseSnapshot(JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString('utf8')));
     });
+  }
+  /**
+   * What the readiness endpoint needs, without reading snapshot bodies: when the binding last uploaded (survives the purge),
+   * the newest stored capture time, whether that snapshot is still inside the serve window, and the window's length.
+   * Null if the binding is revoked or unknown.
+   */
+  summary(id:string):{lastUploadedAt:number|null;newestCapturedAt:string|null;servable:boolean;staleDays:number}|null {
+    const binding=this.db.prepare('SELECT last_uploaded_at FROM bindings WHERE id=? AND revoked=0').get(id);
+    if(!binding)return null;
+    // At most twenty rows per binding; compared by parsed time because capture strings may differ in precision.
+    let newest:string|null=null,newestMs=-Infinity;
+    for(const row of this.db.prepare('SELECT captured_at FROM snapshots WHERE binding_id=?').all(id)) {
+      const ms=Date.parse(String(row.captured_at));if(ms>newestMs){newestMs=ms;newest=String(row.captured_at);}
+    }
+    const cutoff=this.now()-this.retention.staleDays*DAY;
+    return {lastUploadedAt:binding.last_uploaded_at===null||binding.last_uploaded_at===undefined?null:Number(binding.last_uploaded_at),
+      newestCapturedAt:newest,servable:newest!==null&&Date.parse(newest)>=cutoff,staleDays:this.retention.staleDays};
   }
   /** Deletes snapshots older than deleteDays and bindings revoked more than deleteDays ago. */
   purge():{snapshots:number;bindings:number} {
