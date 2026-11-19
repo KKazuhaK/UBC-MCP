@@ -36,6 +36,8 @@ export type McpResourceConfig={
   audience:string;
   /** Require `typ: at+jwt` (RFC 9068). Default true. */
   requireAtJwt:boolean;
+  /** Token claim that identifies the account (default `sub`). Accounts are keyed by issuer and claim. */
+  subjectClaim:string;
   /** Number of trusted reverse proxies in front of the connector; 0 (default) ignores X-Forwarded-For. */
   trustProxy:number;
   /** Base URL of the platform whose adapter created legacy (issuer-less) accounts, if any. */
@@ -54,8 +56,10 @@ export function checkedUrl(value:string,what:string,opts:{path:boolean}) {
 /**
  * UBC_MCP_HTTP=on enables the endpoint (unset, empty or "off": disabled).
  * Requires UBC_PUBLIC_ORIGIN and UBC_OAUTH_ISSUER; UBC_MCP_RESOURCE overrides
- * the resource identifier (default `${UBC_PUBLIC_ORIGIN}/mcp`) and
- * UBC_OAUTH_AUDIENCE the accepted `aud` (default: the resource).
+ * the resource identifier (default `${UBC_PUBLIC_ORIGIN}/mcp`); the endpoint
+ * is served at that identifier's path. UBC_OAUTH_AUDIENCE sets the accepted
+ * `aud` (default: the resource) and UBC_OAUTH_SUBJECT_CLAIM the claim that
+ * names the account (default `sub`).
  */
 export function mcpConfigFromEnv(env:McpEnv=process.env):McpResourceConfig|null {
   const flag=(env.UBC_MCP_HTTP??'').trim().toLowerCase();
@@ -66,6 +70,9 @@ export function mcpConfigFromEnv(env:McpEnv=process.env):McpResourceConfig|null 
   const issuer=need('UBC_OAUTH_ISSUER');checkedUrl(issuer,'UBC_OAUTH_ISSUER',{path:true});
   const rawResource=(env.UBC_MCP_RESOURCE??'').trim();
   const resource=rawResource||`${origin}${MCP_PATH}`;checkedUrl(resource,'UBC_MCP_RESOURCE',{path:true});
+  if(new URL(resource).pathname.replace(/\/+$/,'')==='')throw new Error('UBC_MCP_RESOURCE must have a path, for example /ubc/mcp');
+  const subjectClaim=(env.UBC_OAUTH_SUBJECT_CLAIM??'').trim()||'sub';
+  if(!/^[A-Za-z0-9_.:-]{1,64}$/.test(subjectClaim)||['iss','aud','exp','nbf','iat','jti'].includes(subjectClaim))throw new Error('UBC_OAUTH_SUBJECT_CLAIM must be a plain claim name such as sub or mcphub_uid');
   const audience=(env.UBC_OAUTH_AUDIENCE??'').trim()||resource;
   const flagOf=(key:string,fallback:boolean)=>{
     const v=(env[key]??'').trim().toLowerCase();if(!v)return fallback;
@@ -79,10 +86,11 @@ export function mcpConfigFromEnv(env:McpEnv=process.env):McpResourceConfig|null 
   const platformRaw=['mcphub','mcphub-oauth'].includes(adapter)?(env.UBC_PLATFORM_URL||env.UBC_HUB_URL||env.UBC_PUBLIC_ORIGIN||''):'';
   let platformUrl:string|null=null;
   if(platformRaw){try{platformUrl=new URL(platformRaw).href.replace(/\/+$/,'');}catch{platformUrl=null;}}
-  return {origin,issuer,resource,audience,requireAtJwt:flagOf('UBC_OAUTH_REQUIRE_AT_JWT',true),trustProxy,platformUrl};
+  return {origin,issuer,resource,audience,requireAtJwt:flagOf('UBC_OAUTH_REQUIRE_AT_JWT',true),subjectClaim,trustProxy,platformUrl};
 }
 
-export type VerifiedToken={iss:string;sub:string;scopes:string[];clientId:string;expiresAt:number};
+/** `sub` is the token's own subject; `subject` is the value of the configured claim and keys the account. */
+export type VerifiedToken={iss:string;sub:string;subject:string;scopes:string[];clientId:string;expiresAt:number};
 /** `reason` is a category only (never token contents): size, malformed, alg, typ, iss, aud, exp, sub, kid, signature, claims. */
 export class TokenInvalid extends Error {constructor(readonly reason:string){super(reason);}}
 export class IssuerUnavailable extends Error {constructor(readonly reason:string){super(reason);}}
@@ -93,7 +101,7 @@ const isKeySet=(v:unknown)=>typeof v==='object'&&v!==null&&Array.isArray((v as {
 const bareIssuer=(s:string)=>s.replace(/\/+$/,'');
 
 /** Verifies RFC 9068 JWT access tokens against the issuer's JWKS (discovered, cached, refetched on an unknown kid). */
-export function createTokenVerifier(config:Pick<McpResourceConfig,'issuer'|'audience'|'requireAtJwt'>,request:typeof fetch=fetch):TokenVerifier {
+export function createTokenVerifier(config:Pick<McpResourceConfig,'issuer'|'audience'|'requireAtJwt'>&{subjectClaim?:string},request:typeof fetch=fetch):TokenVerifier {
   let lastReason='issuer discovery failed';
   let current:{jwks:ReturnType<typeof createRemoteJWKSet>;until:number}|null=null;
   let pending:Promise<ReturnType<typeof createRemoteJWKSet>>|null=null,failedUntil=0;
@@ -158,20 +166,23 @@ export function createTokenVerifier(config:Pick<McpResourceConfig,'issuer'|'audi
     }
     // A single trailing slash is not significant on either side.
     if(typeof payload.iss!=='string'||normalizeIssuer(payload.iss)!==normalizeIssuer(config.issuer))throw new TokenInvalid('iss');
-    const sub=payload.sub;
-    // eslint-disable-next-line no-control-regex
-    if(typeof sub!=='string'||!sub||sub.length>256||/[\u0000-\u001f\u007f]/.test(sub))throw new TokenInvalid('sub');
+    const valid=(v:unknown):v is string=>typeof v==='string'&&!!v&&v.length<=256&&!/[\u0000-\u001f\u007f]/.test(v);  // eslint-disable-line no-control-regex
+    const sub=payload.sub,claim=config.subjectClaim??'sub';
+    if(!valid(sub))throw new TokenInvalid('sub');
+    // The configured claim must be present and a string; there is no fallback to another claim.
+    const subject=claim==='sub'?sub:payload[claim];
+    if(!valid(subject))throw new TokenInvalid('sub');
     const scope=typeof payload.scope==='string'?payload.scope.split(/\s+/).filter(Boolean):[];
     const clientId=typeof payload.client_id==='string'?payload.client_id:typeof payload.azp==='string'?payload.azp:'';
-    return {iss:normalizeIssuer(config.issuer),sub,scopes:scope,clientId,expiresAt:payload.exp!};
+    return {iss:normalizeIssuer(config.issuer),sub,subject,scopes:scope,clientId,expiresAt:payload.exp!};
   };
 }
 
 /** A personal data source for exactly one issuer+sub pair, read straight from the store. */
-function accountSource(store:Store,iss:string,sub:string,legacyAllowed:()=>Promise<boolean>):PersonalSource {
+function accountSource(store:Store,iss:string,sub:string,claim:string,legacyAllowed:()=>Promise<boolean>):PersonalSource {
   const revoked=()=>new SourceError('CONNECTION_REVOKED','Personal connection is missing or revoked. Connect your own UBC data first.');
   return {configured:()=>true,snapshots:async()=>{
-    const found=store.accountForIssuer(iss,sub);
+    const found=store.accountForIssuer(iss,sub,claim);
     if(!found||(found.via==='legacy'&&!(await legacyAllowed())))throw revoked();
     try{return store.get(found.account.id);}catch{throw revoked();}
   }};
@@ -220,9 +231,11 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
   const legacyAllowed=platformAuthority(config,request,log);
   const lastLogged=new Map<string,number>();
   const logLimited=(key:string,message:string)=>{const now=Date.now();if((lastLogged.get(key)??0)+60_000>now)return;lastLogged.set(key,now);log(message);};
-  const resourceOrigin=new URL(config.resource).origin,metadataUrl=`${new URL(config.origin).origin}${METADATA_PATH}`;
-  const resourcePath=new URL(config.resource).pathname;
-  const metadataPaths=[...new Set([METADATA_PATH,resourcePath==='/'?METADATA_PATH:METADATA_PATH+resourcePath.replace(/\/+$/,''),`${METADATA_PATH}${MCP_PATH}`])];
+  // The endpoint lives at the resource's path. Its metadata is at the RFC 9728 path form; the root document is served only for the
+  // default /mcp resource, because on a shared origin the root belongs to the platform in front.
+  const resourceOrigin=new URL(config.resource).origin,resourcePath=new URL(config.resource).pathname.replace(/\/+$/,'');
+  const pathForm=METADATA_PATH+resourcePath,metadataUrl=`${resourceOrigin}${pathForm}`;
+  const metadataPaths=resourcePath===MCP_PATH?[METADATA_PATH,pathForm]:[pathForm];
   const metadata={resource:config.resource,authorization_servers:[config.issuer],bearer_methods_supported:['header'],scopes_supported:[] as string[]};
   // Public catalogue/grade caches hold no user data and are shared; everything personal is built per request.
   const http=new PublicHttp(),shared={http,catalog:new Catalog(http),grades:new Grades(http)};
@@ -231,7 +244,7 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
     if(typeof sub!=='string'||!sub)throw new Error('Unauthenticated MCP request');
     const iss=ctx.authInfo?.extra?.iss;
     if(typeof iss!=='string')throw new Error('Unauthenticated MCP request');
-    return createServerFor(accountSource(store,iss,sub,legacyAllowed),shared).server;
+    return createServerFor(accountSource(store,iss,sub,config.subjectClaim,legacyAllowed),shared).server;
   },{legacy:'stateless',maxRequestBodySize:MAX_BODY,onerror:e=>log(`MCP request error: ${e.name}`)});
   // Requests with a valid token are never limited by address, only per issuer+subject. The per-address limiters throttle requests that
   // fail authentication: invalid tokens (120/min) and, more generously, missing or expired ones (600/min).
@@ -267,7 +280,12 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
       logLimited('invalid:'+(e instanceof TokenInvalid?e.reason:'other'),`MCP token rejected: ${e instanceof TokenInvalid?e.reason:'other'}`);
       return sendJson(res,401,{error:'invalid_token'},{'WWW-Authenticate':challenge(true)});
     }
-    if(!hit(subjects,`${auth.iss}\n${auth.sub}`,600))return sendJson(res,429,{error:'RATE_LIMITED'},{'Retry-After':'60'});
+    if(!hit(subjects,`${auth.iss}\n${auth.subject}`,600))return sendJson(res,429,{error:'RATE_LIMITED'},{'Retry-After':'60'});
+    // First sight of a stable subject: carry over the account this user had under the old username key, if it is unambiguous.
+    if(config.subjectClaim!=='sub') {
+      try{await store.adopt(auth.iss,config.subjectClaim,auth.subject,auth.sub,legacyAllowed);}
+      catch{logLimited('adopt','MCP: moving an account to its stable key failed');}
+    }
     let body:Buffer|undefined;
     if(req.method==='POST') {
       if(Number(req.headers['content-length']??0)>MAX_BODY){req.resume();return sendJson(res,413,{error:'PAYLOAD_TOO_LARGE'});}
@@ -280,7 +298,7 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
       if(v===undefined||k==='authorization'||k==='cookie')continue;
       if(Array.isArray(v))for(const x of v)headers.append(k,x);else headers.set(k,v);
     }
-    const authInfo:AuthInfo={token:'',clientId:auth.clientId,scopes:auth.scopes,expiresAt:auth.expiresAt,resource:new URL(config.resource),extra:{sub:auth.sub,iss:auth.iss}};
+    const authInfo:AuthInfo={token:'',clientId:auth.clientId,scopes:auth.scopes,expiresAt:auth.expiresAt,resource:new URL(config.resource),extra:{sub:auth.subject,iss:auth.iss}};
     const request=new Request(`${resourceOrigin}${MCP_PATH}${search}`,{method:req.method!,headers,...(body?{body:new Uint8Array(body)}:{})});
     const response=await handler.fetch(request,{authInfo});
     res.statusCode=response.status;
@@ -300,7 +318,7 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
 
   return {
     config,
-    handles:url=>{const p=new URL(url,'http://connector.invalid').pathname;return p===MCP_PATH||metadataPaths.includes(p);},
+    handles:url=>{const p=new URL(url,'http://connector.invalid').pathname;return p===resourcePath||metadataPaths.includes(p);},
     async handle(req,res) {
       const parsed=new URL(req.url??'/','http://connector.invalid');
       if(metadataPaths.includes(parsed.pathname)) {

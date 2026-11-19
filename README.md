@@ -220,11 +220,10 @@ See [the container deployment guide](deploy/selfhost/README.md) for automated mu
 ## Remote MCP endpoint (OAuth)
 
 The connector can serve the public and personal tools over Streamable HTTP at
-`/mcp` as a standard OAuth-protected MCP resource (MCP authorization
+`/mcp` (or the path of `UBC_MCP_RESOURCE`) as a standard OAuth-protected MCP resource (MCP authorization
 specification, RFC 9728 protected resource metadata). It is **off by default**
 and independent of any platform: it only validates bearer JWT access tokens
-from one issuer and maps the token's `sub` to the connector account of the same
-username (the same keying the platform adapters use). The stdio server and the
+from one issuer and maps one claim of the token (`sub` by default) to the connector account for that issuer. The stdio server and the
 READ-token snapshot API are unchanged.
 
 | Variable | Meaning |
@@ -232,16 +231,19 @@ READ-token snapshot API are unchanged.
 | `UBC_MCP_HTTP` | `on` enables the endpoint; unset, empty or `off` disables it. Any other value is a startup error. |
 | `UBC_PUBLIC_ORIGIN` | Required. Origin the connector is reached on: `https://...` (plain `http://` only for `localhost`, `127.0.0.1`, `[::1]`), no path. |
 | `UBC_OAUTH_ISSUER` | Required. Issuer URL of the authorization server (https, or http on loopback). Must equal the tokens' `iss` exactly. |
-| `UBC_MCP_RESOURCE` | Optional resource identifier. Default `${UBC_PUBLIC_ORIGIN}/mcp`. Set it when a reverse proxy changes the public URL. The endpoint itself is always served at `/mcp`. |
+| `UBC_MCP_RESOURCE` | Optional resource identifier, with a path. Default `${UBC_PUBLIC_ORIGIN}/mcp`. The endpoint is served at this URL's path (for example `/ubc/mcp`), so several services can share one origin. |
+| `UBC_OAUTH_SUBJECT_CLAIM` | Optional. The token claim that names the account. Default `sub`. It must be a string; if it is missing or not a string the request is refused with 401, and no other claim is tried. Accounts are stored under the issuer and the claim, so changing it starts from empty accounts. |
 | `UBC_OAUTH_AUDIENCE` | Optional required `aud`. Default: the resource identifier. |
 | `UBC_OAUTH_REQUIRE_AT_JWT` | Default `true`: the token header must carry `typ: at+jwt` (RFC 9068). Set `false` for issuers that sign access tokens with `typ: JWT` or no `typ`, for example some Keycloak and Okta configurations. `iss`, `aud`, `exp`, `sub` and `alg` stay strictly enforced. |
 | `UBC_TRUST_PROXY` | Default off (X-Forwarded-For is ignored). A hop count such as `1` takes the client address from the entry that many places from the right of X-Forwarded-For, i.e. the first address not added by your own proxies. Set it behind a reverse proxy, otherwise every client shares the proxy's address in the rate limits. |
 
 Endpoints:
 
-- `POST|GET|DELETE /mcp`: Streamable HTTP (stateless; one fresh server per request). 
-- `GET /.well-known/oauth-protected-resource` (also served at `/.well-known/oauth-protected-resource/mcp`):
+- `POST|GET|DELETE` at the resource path (default `/mcp`): Streamable HTTP (stateless; one fresh server per request).
+- `GET /.well-known/oauth-protected-resource<resource path>` (RFC 9728 path form, for example `/.well-known/oauth-protected-resource/ubc/mcp`):
   `{"resource": ..., "authorization_servers": [issuer], "bearer_methods_supported": ["header"], "scopes_supported": []}`.
+  The root document `/.well-known/oauth-protected-resource` is served only when the resource path is the default `/mcp`;
+  on an origin shared with another service (such as MCPHub) the root document belongs to that service.
 
 Token validation (any standard authorization server issuing RFC 9068 JWT access tokens works):
 
@@ -250,8 +252,8 @@ Token validation (any standard authorization server issuing RFC 9068 JWT access 
   The key set is cached and refetched when a token names an unknown `kid` (at most every 30 seconds).
 - Header `typ` must be `at+jwt`; `alg` must be `ES256` or `RS256` (`none`, `HS*` and everything else are rejected before any key is fetched).
 - `iss` must equal `UBC_OAUTH_ISSUER`, `aud` (a string, or an array containing it) must equal the audience exactly,
-  `exp` and a non-empty `sub` are required, and 60 seconds of clock skew are tolerated. `scope` is optional and not required.
-- No token: `401` with `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource"`.
+  `exp` and a non-empty `sub` are required (and the configured subject claim, if it is not `sub`), and 60 seconds of clock skew are tolerated. `scope` is optional and not required.
+- No token: `401` with `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource<resource path>"`.
   A presented but invalid token: the same with `error="invalid_token"` added. If the issuer cannot be reached the answer is `503`
   (never an implicit allow). Tokens are never logged, stored or forwarded.
 - Requests carrying an `Origin` header are refused and no CORS headers are ever sent; bodies are limited to 1 MB.
@@ -296,14 +298,42 @@ UBC_DATA_DIR=/data UBC_OAUTH_ISSUER=https://auth.example.org node dist/connector
 
 Register `https://ubc.example.org/mcp` as the resource (audience) at your authorization server and make it put the
 user's connector username in `sub`. Setting `UBC_PLATFORM_ADAPTER=none` matters here: `UBC_PUBLIC_ORIGIN` alone would
-otherwise enable the deprecated `mcphub` adapter. Behind a reverse proxy, forward `/mcp` and `/.well-known/oauth-protected-resource`.
+otherwise enable the deprecated `mcphub` adapter. Behind a reverse proxy, forward `/mcp` and `/.well-known/oauth-protected-resource/mcp`.
 
 ### With MCPHub
 
-MCPHub is one possible issuer. Its admin adds an `externalResources` entry whose resource is
-`<UBC_PUBLIC_ORIGIN>/mcp` and allows the client; set `UBC_OAUTH_ISSUER` to the MCPHub base URL and keep the audience at its default.
-MCPHub then connects to the endpoint with its personal OAuth identity mode (the access token's `sub` is the MCPHub username,
-which is the account name `mcphub-oauth` creates). That wiring is a separate step.
+Recommended setup: MCPHub calls the connector's `/mcp` endpoint with an access token that MCPHub issues for the
+connector, so nobody copies a token by hand. MCPHub's `ubc-personal` entry becomes a streamable-http server with
+`oauth.identityMode: personal` and the URL `https://mcp.example.org/ubc/mcp`. The same URL is listed under
+`oauthServer.externalResources`, with `skipConsentForPersonalConnection: true`. MCPHub puts a stable user id in
+the token as the `mcphub_uid` claim, and the connector keys accounts by that claim, so renaming or reusing a username
+cannot reach another person's data.
+
+Connector environment:
+
+```sh
+UBC_MCP_HTTP=on
+UBC_PUBLIC_ORIGIN=https://mcp.example.org
+UBC_OAUTH_ISSUER=https://mcp.example.org
+UBC_MCP_RESOURCE=https://mcp.example.org/ubc/mcp
+UBC_OAUTH_SUBJECT_CLAIM=mcphub_uid
+UBC_PLATFORM_ADAPTER=mcphub-oauth
+UBC_TRUST_PROXY=1
+```
+
+plus the `mcphub-oauth` variables below (`UBC_PLATFORM_URL`, `UBC_OAUTH_CLIENT_ID`, `UBC_SESSION_SECRET`). The reverse proxy
+forwards `/ubc/` (the connection page and extension pairing), `/ubc/mcp`, `/v1/snapshots`, and exactly
+`/.well-known/oauth-protected-resource/ubc/mcp` to the connector; the other `/.well-known/` documents stay with MCPHub. See
+[deploy/mcphub/README.md](deploy/mcphub/README.md).
+
+With `UBC_MCP_HTTP=on`, the `mcphub-oauth` adapter only signs users in. It asks for no `credentials:write` scope and
+never calls MCPHub's `/api/credentials`, so no READ token is stored in MCPHub. It reads the same claim from MCPHub's
+userinfo, so the connection page, the extension and `/mcp` all use the same account. The first time an account is
+seen under its uid, an older account stored under the MCPHub username moves to the uid, but only if it was created
+through the same issuer, and never if an account for that uid already exists. Without `UBC_MCP_HTTP=on`, nothing about
+the adapter changes (see below).
+
+The standalone setup above and the stdio server are unchanged.
 
 ## Optional: MCPHub integration
 

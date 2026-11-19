@@ -48,6 +48,50 @@ fallback exists. A personal service with no binding fails closed at startup.
 Use private visibility for the pilot. Hub and connector administrators are trusted
 with data custody; encryption does not hide snapshots from the host operator.
 
+## Personal profile without token copying (recommended)
+
+Instead of storing a READ token in MCPHub for each user, MCPHub can call the connector's
+`/mcp` endpoint with an access token it issues itself. Users sign in once on the UBC
+connection page; nothing is copied. Standalone use and the stdio setup above are unchanged.
+
+Connector environment (in addition to the data volume and the `mcphub-oauth` variables
+`UBC_PLATFORM_URL`, `UBC_OAUTH_CLIENT_ID` and `UBC_SESSION_SECRET`):
+
+```sh
+UBC_MCP_HTTP=on
+UBC_PUBLIC_ORIGIN=https://mcp.kazuhahub.com
+UBC_OAUTH_ISSUER=https://mcp.kazuhahub.com
+UBC_MCP_RESOURCE=https://mcp.kazuhahub.com/ubc/mcp
+UBC_OAUTH_SUBJECT_CLAIM=mcphub_uid
+UBC_PLATFORM_ADAPTER=mcphub-oauth
+UBC_TRUST_PROXY=1
+```
+
+Reverse proxy: add an exact location for
+`/.well-known/oauth-protected-resource/ubc/mcp` that goes to the connector (an `=` location
+in nginx). Keep `/ubc/`, `/ubc/mcp` and `/v1/snapshots` going to the connector as before. Do
+not route the root `/.well-known/oauth-protected-resource` or any other `/.well-known/` path:
+those belong to MCPHub. The connector must not be reachable except through the proxy.
+
+MCPHub configuration:
+
+- `oauthServer.externalResources`: an entry for `https://mcp.kazuhahub.com/ubc/mcp` with
+  `skipConsentForPersonalConnection: true`, so users are not asked to approve it.
+- the `ubc-personal` server entry: type `streamable-http`, url
+  `https://mcp.kazuhahub.com/ubc/mcp`, `oauth.identityMode: personal`. Remove the
+  `env.UBC_CONNECTOR_TOKEN` slot. MCPHub must issue the stable `mcphub_uid` claim in these tokens.
+
+In this mode the connection page only signs the user in with MCPHub. It requests no
+`credentials:write` scope and never writes to MCPHub's credential API, so MCPHub holds no
+READ token for UBC. The page, the extension pairing and `/mcp` all use the account keyed by
+`mcphub_uid`. An older account stored under the MCPHub username moves to the uid at the
+first sign-in or first `/mcp` request, if it was created through the same issuer. If an
+account for that uid already exists, nothing is merged.
+
+Acceptance: sign in on `/ubc/` as user A and user B; pair the extension and sync different
+data for each; check from MCPHub that each sees only their own data; revoke A on the page and
+check that A's reads stop and B's continue.
+
 ## Acceptance and rollback
 
 1. Public stdio entry reports the `package.json` version of the installed release and seven read-only tools.

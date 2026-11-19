@@ -1,16 +1,17 @@
 import {createHash,createHmac,hkdfSync,randomBytes,timingSafeEqual} from 'node:crypto';
 import type {IncomingMessage,ServerResponse} from 'node:http';
+import {normalizeIssuer} from '../store.js';
 import type {Store} from '../store.js';
 import type {PlatformAdapter} from './index.js';
 import {page,script} from './mcphub-oauth-web.js';
 import {handleClaim,PAGE_HEADERS,SERVER_NAME} from './shared.js';
 
-export type McphubOAuthConfig={origin:string;platformUrl:string;clientId:string;clientSecret?:string;sessionSecret:string;serverName?:string;warn?:(message:string)=>void;log?:(message:string)=>void};
+export type McphubOAuthConfig={origin:string;platformUrl:string;clientId:string;clientSecret?:string;sessionSecret:string;/** Sign users in only: no credential scope and no calls to the platform's credential API. Requires `issuer`. */signInOnly?:boolean;/** The issuer the remote MCP endpoint trusts; sign-in accounts are keyed to it. */issuer?:string;/** Userinfo claim that names the account (default `sub`). */subjectClaim?:string;serverName?:string;warn?:(message:string)=>void;log?:(message:string)=>void};
 type Send=(status:number,value:unknown)=>void;
 type Intent='connect'|'disconnect';
 type Discovery={issuer:string|null;authorize:URL;token:URL;userinfo:URL;basicAuth:boolean};
 type Tx={s:string;v:string;i:Intent;e:number;x?:string;u?:string};
-type Session={u:string;b:string;e:number;c:string};
+type Session={u:string;b:string;e:number;c:string;n?:string};
 
 const TX_COOKIE='ubc_oauth',SESSION_COOKIE='ubc_session',TX_TTL=10*60_000,SESSION_TTL=7*24*60*60_000,DISCOVERY_TTL=5*60_000;
 const LOOPBACK=['localhost','127.0.0.1','[::1]'];
@@ -48,7 +49,13 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
   const origin=originUrl.origin,secureCookies=originUrl.protocol==='https:',redirectUri=`${origin}/ubc/oauth/callback`;
   const hub=validateUrl(config.platformUrl,'UBC_PLATFORM_URL','any'),hubBase=hub.href.replace(/\/+$/,'');
   if(hub.protocol==='http:'&&!LOOPBACK.includes(hub.hostname))(config.warn??(()=>{}))('UBC_PLATFORM_URL uses plain http; OAuth tokens and credentials would cross the network unencrypted. Use it only on a trusted private network.');
-  const serverName=config.serverName??'ubc-personal',scope=`credentials:write:${serverName}`;
+  const serverName=config.serverName??'ubc-personal',signInOnly=config.signInOnly===true,claim=config.subjectClaim??'sub';
+  // Sign-in-only mode asks for no credential scope: the access token proves who the user is and is then dropped.
+  const scope=signInOnly?'':`credentials:write:${serverName}`;
+  if(signInOnly&&!config.issuer)throw new Error('Sign-in-only mode requires the issuer');
+  const issuer=config.issuer??'';
+  // Accounts of the sign-in-only mode are linked to the issuer and claim, exactly like the remote MCP endpoint's.
+  const findAccount=(subject:string,create=false)=>signInOnly?store.linkedAccount(issuer,subject,create,claim):store.account(subject,create);
   if(!SERVER_NAME.test(serverName))throw new Error('Invalid platform server name');
   const clientId=config.clientId;
   if(!clientId||clientId.length>256||/[\s\x00-\x1f]/.test(clientId))throw new Error('Invalid UBC_OAUTH_CLIENT_ID');
@@ -75,7 +82,7 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
   function session(req:IncomingMessage) {
     const s=open<Session>(SESSION_COOKIE,cookie(req,SESSION_COOKIE));
     if(!s||typeof s.u!=='string'||typeof s.b!=='string'||typeof s.c!=='string')return null;
-    const a=store.account(s.u);return a&&a.id===s.b?{...s,account:a}:null;
+    const a=findAccount(s.u);return a&&a.id===s.b?{...s,account:a}:null;
   }
 
   // ---- OAuth client -----------------------------------------------------------
@@ -119,13 +126,15 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
       return t.access_token;
     }catch(e){if(e instanceof FlowError)throw e;fail('token exchange');throw new FlowError('UPSTREAM');}
   }
-  async function identity(d:Discovery,token:string):Promise<string> {
+  async function identity(d:Discovery,token:string):Promise<{username:string;subject:string}> {
     try {
       const r=await call(d.userinfo,{headers:{Authorization:`Bearer ${token}`,Accept:'application/json'}});
       if(!r.ok){await r.body?.cancel();fail('userinfo',r.status);throw new FlowError('UPSTREAM');}
       const u=await readJson(r);
       if(typeof u?.sub!=='string'||!u.sub||u.sub.length>256||/[\x00-\x1f\x7f]/.test(u.sub)){fail('userinfo');throw new FlowError('UPSTREAM');}
-      return u.sub;
+      const subject=claim==='sub'?u.sub:u[claim];
+      if(typeof subject!=='string'||!subject||subject.length>256||/[\x00-\x1f\x7f]/.test(subject)){fail('userinfo');throw new FlowError('UPSTREAM');}
+      return {username:u.sub,subject};
     }catch(e){if(e instanceof FlowError)throw e;fail('userinfo');throw new FlowError('UPSTREAM');}
   }
   async function credential(token:string,method:'PUT'|'DELETE',values?:Record<string,string>):Promise<void> {
@@ -137,7 +146,8 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
   }
 
   // ---- HTTP -----------------------------------------------------------------
-  const page$=()=>page.replaceAll('{{PLATFORM_ORIGIN}}',origin).replaceAll('{{SERVER_NAME}}',serverName);
+  const SCOPE_TEXT='仅允许写入你自己的 {{SERVER_NAME}} 凭证；访问令牌用完即丢弃，不会保存。';
+  const page$=()=>(signInOnly?page.replace(SCOPE_TEXT,'仅用于确认你的 MCPHub 身份，不会写入任何凭证；访问令牌用完即丢弃，不会保存。'):page).replaceAll('{{PLATFORM_ORIGIN}}',origin).replaceAll('{{SERVER_NAME}}',serverName);
   function html(res:ServerResponse,status:number,body:string,cookies:string[]=[]) {
     res.writeHead(status,{'Content-Type':'text/html; charset=utf-8',...PAGE_HEADERS,...(cookies.length?{'Set-Cookie':cookies}:{})});res.end(body);
   }
@@ -152,7 +162,7 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
     const state=b64(randomBytes(32)),verifier=b64(randomBytes(32));
     const tx:Tx={s:state,v:verifier,i:intent,e:Date.now()+TX_TTL,...extra};
     const url=new URL(d.authorize);
-    for(const [k,v] of Object.entries({response_type:'code',client_id:clientId,redirect_uri:redirectUri,scope,state,code_challenge:b64(createHash('sha256').update(verifier).digest()),code_challenge_method:'S256'}))url.searchParams.set(k,v);
+    for(const [k,v] of Object.entries({response_type:'code',client_id:clientId,redirect_uri:redirectUri,...(scope?{scope}:{}),state,code_challenge:b64(createHash('sha256').update(verifier).digest()),code_challenge_method:'S256'}))url.searchParams.set(k,v);
     return {url:url.href,cookie:setCookie(TX_COOKIE,sign(TX_COOKIE,tx),TX_TTL/1000)};
   }
   // State-changing requests: same-origin, JSON, a live connector session and its CSRF token.
@@ -191,21 +201,30 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
       if(!code||code.length>2048)throw new FlowError('STATE',400);
       const disconnect=tx.i==='disconnect',current=disconnect?session(req):null;
       if(disconnect&&(!current||current.u!==tx.u))throw new FlowError('SESSION',401);
-      const d=await discover(),token=await exchange(d,code,tx.v),username=await identity(d,token);
+      const d=await discover(),token=await exchange(d,code,tx.v),{username,subject}=await identity(d,token);
+      // The platform that signs users in must be the issuer the MCP endpoint trusts, or the two would key accounts differently.
+      if(signInOnly&&(!d.issuer||normalizeIssuer(d.issuer)!==normalizeIssuer(issuer))){fail('issuer check');throw new FlowError('UPSTREAM');}
       if(disconnect) {
-        if(username!==current!.u)throw new FlowError('MISMATCH',403);
+        if(subject!==current!.u)throw new FlowError('MISMATCH',403);
         // Connector revocation always wins, even if the platform cleanup fails.
         store.revoke(current!.account.id);
         let warning=false;
-        try{await credential(token,'DELETE');}catch{fail('credential delete');warning=true;}
+        if(!signInOnly)try{await credential(token,'DELETE');}catch{fail('credential delete');warning=true;}
         redirect(res,`/ubc/?notice=${warning?'disconnected-warning':'disconnected'}`,[...cookies,clear(SESSION_COOKIE)]);return;
       }
-      // Do not leave an orphan account behind if MCPHub refuses the credential.
-      const existing=store.account(username),account=existing??store.account(username,true)!;
-      try{await credential(token,'PUT',{'env.UBC_CONNECTOR_TOKEN':account.readToken});}
-      catch{fail('credential save');if(!existing)store.revoke(account.id);throw new FlowError('SAVE');}
-      if(d.issuer)store.recordIssuer(username,d.issuer);
-      const s:Session={u:username,b:account.id,e:Date.now()+SESSION_TTL,c:b64(randomBytes(32))};
+      let account:{id:string;readToken:string;uploadToken:string};
+      if(signInOnly) {
+        // The MCP endpoint reads this account by the same key; no credential is written to the platform.
+        await store.adopt(issuer,claim,subject,username,async()=>true);
+        account=findAccount(subject,true)!;
+      }else {
+        // Do not leave an orphan account behind if MCPHub refuses the credential.
+        const existing=store.account(username);account=existing??store.account(username,true)!;
+        try{await credential(token,'PUT',{'env.UBC_CONNECTOR_TOKEN':account.readToken});}
+        catch{fail('credential save');if(!existing)store.revoke(account.id);throw new FlowError('SAVE');}
+        if(d.issuer)store.recordIssuer(username,d.issuer);
+      }
+      const s:Session={u:subject,b:account.id,e:Date.now()+SESSION_TTL,c:b64(randomBytes(32)),...(subject!==username?{n:username}:{})};
       const ext=typeof tx.x==='string'&&/^[a-f0-9]{64}$/.test(tx.x)?`#extension-auth=${tx.x}`:'';
       redirect(res,`/ubc/?connected=1${ext}`,[...cookies,setCookie(SESSION_COOKIE,sign(SESSION_COOKIE,s),SESSION_TTL/1000)]);
     }catch(e){errorPage(req,res,e instanceof FlowError?e:new FlowError('UPSTREAM'),cookies);}
@@ -250,9 +269,9 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
       if(method!=='GET'){send(405,{error:'METHOD_NOT_ALLOWED'});return;}
       const s=session(req);
       if(!s){send(200,{authenticated:false,scopes:[]});return;}
-      send(200,{authenticated:true,username:s.u,csrf:s.c,scopes:store.get(s.account.id).map(x=>({campus:x.campus,period:x.academicPeriod.id,kind:x.kind,capturedAt:x.capturedAt,sections:x.sections.length}))});return;
+      send(200,{authenticated:true,username:s.n??s.u,csrf:s.c,scopes:store.get(s.account.id).map(x=>({campus:x.campus,period:x.academicPeriod.id,kind:x.kind,capturedAt:x.capturedAt,sections:x.sections.length}))});return;
     }
-    if(path==='/ubc/api/pair') {const s=guard(req,send);if(s)send(200,store.pair(s.u));return;}
+    if(path==='/ubc/api/pair') {const s=guard(req,send);if(s)send(200,signInOnly?store.pair(s.u,{issuer,claim}):store.pair(s.u));return;}
     if(path==='/ubc/api/forget') {
       // Local only: clears this browser's connector session, nothing on either server.
       if(method!=='POST'){send(405,{error:'METHOD_NOT_ALLOWED'});return;}
