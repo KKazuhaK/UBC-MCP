@@ -219,6 +219,11 @@ export type McpResource={
   config:McpResourceConfig;
   handles(url:string):boolean;
   handle(req:IncomingMessage,res:ServerResponse):Promise<void>;
+  /**
+   * Validates a bearer exactly as the MCP endpoint does (issuer, keys, audience, expiry, subject) and finds the account's
+   * binding the same way. `bindingId` is null when the signed-in user has no active binding.
+   */
+  identify(bearer:string):Promise<{ok:true;bindingId:string|null;subjectKey:string}|{ok:false;reason:'invalid'|'unavailable'}>;
   close():Promise<void>;
 };
 
@@ -264,6 +269,12 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
   };
   const challenge=(presented:boolean)=>`Bearer ${presented?'error="invalid_token", ':''}resource_metadata="${metadataUrl}"`;
 
+  // First sight of a subject: carry over the account this user had under the old username key, if it is unambiguous.
+  async function adoptFirst(auth:VerifiedToken) {
+    try{await store.adopt(auth.iss,config.subjectClaim,auth.subject,auth.sub,legacyAllowed);}
+    catch{logLimited('adopt','MCP: moving an account to its stable key failed');}
+  }
+
   async function serve(req:IncomingMessage,res:ServerResponse,search:string) {
     if(req.headers.origin)return sendJson(res,403,{error:'BROWSER_REQUEST_REFUSED'});
     if(!['POST','GET','DELETE'].includes(req.method??''))return sendJson(res,405,{error:'METHOD_NOT_ALLOWED'},{Allow:'POST, GET, DELETE'});
@@ -281,9 +292,7 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
       return sendJson(res,401,{error:'invalid_token'},{'WWW-Authenticate':challenge(true)});
     }
     if(!hit(subjects,`${auth.iss}\n${auth.subject}`,600))return sendJson(res,429,{error:'RATE_LIMITED'},{'Retry-After':'60'});
-    // First sight of a subject: carry over the account this user had under the old username key, if it is unambiguous.
-    try{await store.adopt(auth.iss,config.subjectClaim,auth.subject,auth.sub,legacyAllowed);}
-    catch{logLimited('adopt','MCP: moving an account to its stable key failed');}
+    await adoptFirst(auth);
     let body:Buffer|undefined;
     if(req.method==='POST') {
       if(Number(req.headers['content-length']??0)>MAX_BODY){req.resume();return sendJson(res,413,{error:'PAYLOAD_TOO_LARGE'});}
@@ -325,6 +334,19 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
       }
       try{await serve(req,res,parsed.search);}
       catch{if(!res.headersSent)sendJson(res,500,{error:'SERVICE_UNAVAILABLE'});else res.end();}
+    },
+    async identify(bearer) {
+      let auth:VerifiedToken;
+      try{auth=await verify(bearer);}
+      catch(e) {
+        if(e instanceof IssuerUnavailable){logLimited('unavailable:'+e.reason,`MCP token verification unavailable: ${e.reason}`);return {ok:false,reason:'unavailable'};}
+        logLimited('invalid:'+(e instanceof TokenInvalid?e.reason:'other'),`MCP token rejected: ${e instanceof TokenInvalid?e.reason:'other'}`);
+        return {ok:false,reason:'invalid'};
+      }
+      await adoptFirst(auth);
+      const found=store.accountForIssuer(auth.iss,auth.subject,config.subjectClaim);
+      const usable=found&&!(found.via==='legacy'&&!(await legacyAllowed()));
+      return {ok:true,bindingId:usable?found.account.id:null,subjectKey:`${auth.iss}\n${auth.subject}`};
     },
     close:()=>handler.close(),
   };

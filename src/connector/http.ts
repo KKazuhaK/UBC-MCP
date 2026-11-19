@@ -25,16 +25,24 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
       if(req.method!=='GET')return json(res,404,{error:'NOT_FOUND'});
       if(req.headers.origin)return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
       const now=Date.now(),ip=clientKey(req.socket.remoteAddress??'unknown');
-      const token=/^Bearer ([\w-]+)$/.exec(req.headers.authorization??'')?.[1]??'';
-      const id=store.authenticate(token,'read');
-      if(!id) {
+      const token=/^Bearer ([\w.-]+)$/.exec(req.headers.authorization??'')?.[1]??'';
+      let id=store.authenticate(token,'read'),oauthSubject:string|null=null;
+      // With the hosted OAuth endpoint configured, the bearer it accepts is accepted here too, validated by the same function.
+      if(!id&&mcp&&token.includes('.')) {
+        const who=await mcp.identify(token);
+        if(!who.ok&&who.reason==='unavailable')return json(res,503,{error:'temporarily_unavailable'});
+        if(who.ok){id=who.bindingId;oauthSubject=who.subjectKey;}
+      }
+      if(!id&&oauthSubject===null) {
         // Behind a proxy every client shares one IP, so failures may throttle other failures but never a valid token.
         const failures=failedReadiness.get(ip,now);
         if(failures.count>=60)return json(res,429,{error:'RATE_LIMITED'});
         failures.count++;return json(res,401,{error:'UNAUTHORIZED'});
       }
-      const b=readinessRecent.get(id,now);b.count++;
+      const b=readinessRecent.get(id??`sub:${oauthSubject}`,now);b.count++;
       if(b.count>60)return json(res,429,{error:'RATE_LIMITED'});
+      if(!id)return json(res,200,readiness({lastUploadedAt:null,newestCapturedAt:null,servable:false,staleDays:0},now,readinessConfig,
+        {label:'Connect your UBC data',url:`${mcp!.config.origin}/ubc/`}));
       try {
         const summary=store.summary(id);
         if(!summary)return json(res,401,{error:'UNAUTHORIZED'});

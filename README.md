@@ -123,7 +123,9 @@ and every 6 hours. The stale value must not exceed the delete value.
 
 `GET /v1/readiness` tells a platform (for example MCPHub) whether a user's connection actually works, not just that a
 token is bound. Authenticate with the binding's READ token as `Authorization: Bearer ...`; the UPLOAD token, a missing,
-unknown or revoked token all return `401 {"error":"UNAUTHORIZED"}`. It is read-only, takes no browser origin, and
+unknown or revoked token all return `401 {"error":"UNAUTHORIZED"}`.
+
+Which bearer is accepted depends on the mode. Without the hosted OAuth endpoint, only the binding's READ token. With it configured (`UBC_MCP_HTTP=on`, `UBC_OAUTH_ISSUER`), the sign-in access token that `/mcp` accepts is also accepted, validated by the same function (issuer, keys, audience, expiry, subject claim), and resolved to its binding the same way, so a platform that stores no READ token can still ask. A valid sign-in token with no binding reads `needs_setup` with a "Connect your UBC data" action pointing at `UBC_PUBLIC_ORIGIN/ubc/`; a binding revoked with `revoke` also reads that way, because revocation removes the account link. Invalid, other-audience, expired or subject-less tokens are `401`, and without the hosted endpoint every OAuth bearer is `401`. It is read-only, takes no browser origin, and
 returns only a state and a coarse age, never tokens, snapshots or course data (service readiness contract, version 1).
 
 ```json

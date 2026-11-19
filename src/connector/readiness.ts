@@ -32,11 +32,11 @@ export type ReadinessSummary={lastUploadedAt:number|null;newestCapturedAt:string
  * older than the threshold -> degraded; uploaded before but nothing is served any more (past the window, or purged) -> expired.
  * Carries no tokens, snapshot content or course data.
  */
-export function readiness(summary:ReadinessSummary,now:number,config:ReadinessConfig=DEFAULT_READINESS) {
+export function readiness(summary:ReadinessSummary,now:number,config:ReadinessConfig=DEFAULT_READINESS,setup?:{label:string;url:string}) {
   const checked_at=new Date(now).toISOString(),action={label:'Open the UBC companion',url:config.installUrl};
   if(summary.lastUploadedAt===null&&!summary.newestCapturedAt)
     return {version:1,state:'needs_setup',summary:'No course data has been uploaded yet. Install the UBC browser companion and sync from Workday.',
-      action:{label:'Install the UBC browser companion',url:config.installUrl},checked_at};
+      action:setup??{label:'Install the UBC browser companion',url:config.installUrl},checked_at};
   if(!summary.servable||!summary.newestCapturedAt)
     return {version:1,state:'expired',summary:`Course data is older than ${windowText(summary.staleDays)} and no longer used — open the UBC companion to sync again`,action,checked_at};
   const age=freshness(summary.newestCapturedAt,now,config.staleDays*DAY/1000);
