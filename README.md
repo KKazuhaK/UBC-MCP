@@ -5,7 +5,7 @@ works with any standard MCP client. No hosting platform, account service or
 hardcoded server address is required. Independent project; not affiliated with
 UBC or Workday.
 
-## Current alpha
+## Current release
 
 The public profile provides seven read-only tools over the official UBC Academic
 Calendar and UBCGrades. Vancouver and Okanagan catalog reads and a historical

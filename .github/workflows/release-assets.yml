@@ -59,7 +59,10 @@ jobs:
         run: |
           set -euo pipefail
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --prerelease \
+            # Only a suffixed version (x.y.z-alpha.N and the like) is a prerelease.
+            pre=()
+            if [[ "$TAG" == *-* ]]; then pre=(--prerelease); fi
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft "${pre[@]}" \
               --title "$TAG" --notes "Release notes to be written."
           fi
           gh release upload "$TAG" .release/*.tgz .release/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
