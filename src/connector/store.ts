@@ -52,6 +52,19 @@ export class Store {
       this.db.prepare("UPDATE bindings SET revoked_at=coalesce(revoked_at,?),label='' WHERE revoked=1 AND (revoked_at IS NULL OR label<>'')").run(this.now());
       this.db.exec('COMMIT');
     } catch(e) {this.db.exec('ROLLBACK');throw e;}
+    // Per-binding upload time, kept when snapshots are purged so "never uploaded" stays distinguishable from "expired".
+    // Existing rows are backfilled once, from their newest stored snapshot.
+    if(!this.db.prepare('PRAGMA table_info(bindings)').all().some(c=>c.name==='last_uploaded_at')) {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        this.db.exec('ALTER TABLE bindings ADD COLUMN last_uploaded_at INTEGER');
+        for(const row of this.db.prepare('SELECT binding_id,max(captured_at) AS newest FROM snapshots GROUP BY binding_id').all()) {
+          const ms=Date.parse(String(row.newest));
+          if(Number.isFinite(ms))this.db.prepare('UPDATE bindings SET last_uploaded_at=? WHERE id=?').run(ms,String(row.binding_id));
+        }
+        this.db.exec('COMMIT');
+      }catch(e){this.db.exec('ROLLBACK');throw e;}
+    }
     // Databases from before issuer-bound accounts keyed accounts by username alone.
     if(!this.db.prepare('PRAGMA table_info(accounts)').all().some(c=>c.name==='issuer_key')) {
       this.db.exec('BEGIN IMMEDIATE');
@@ -106,6 +119,7 @@ export class Store {
     const encrypted=Buffer.concat([cipher.update(JSON.stringify(s),'utf8'),cipher.final()]);
     const body=Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64');
     this.db.prepare('INSERT INTO snapshots VALUES(?,?,?,?) ON CONFLICT(binding_id,scope) DO UPDATE SET captured_at=excluded.captured_at,body=excluded.body').run(id,scope,s.capturedAt,body);
+    this.db.prepare('UPDATE bindings SET last_uploaded_at=? WHERE id=?').run(this.now(),id);
     return {capturedAt:s.capturedAt,sections:s.sections.length};
   }
   /** Serves only snapshots captured within the stale window; older ones need a new sync. */
@@ -119,14 +133,19 @@ export class Store {
       return parseSnapshot(JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString('utf8')));
     });
   }
-  /** Count and newest capture time of a binding's stored snapshots, regardless of the stale window. Reads no snapshot bodies. */
-  summary(id:string):{count:number;newestCapturedAt:string|null} {
-    this.active(id);
-    let newest:string|null=null,newestMs=-Infinity,count=0;
-    for(const row of this.db.prepare('SELECT captured_at FROM snapshots WHERE binding_id=?').all(id)){
-      count++;const ms=Date.parse(String(row.captured_at));if(ms>newestMs){newestMs=ms;newest=String(row.captured_at);}
-    }
-    return {count,newestCapturedAt:newest};
+  /**
+   * What the readiness endpoint needs, without reading snapshot bodies: when the binding last uploaded (survives the purge),
+   * the newest stored capture time, whether that snapshot is still inside the serve window, and the window's length.
+   * Null if the binding is revoked or unknown.
+   */
+  summary(id:string):{lastUploadedAt:number|null;newestCapturedAt:string|null;servable:boolean;staleDays:number}|null {
+    const binding=this.db.prepare('SELECT last_uploaded_at FROM bindings WHERE id=? AND revoked=0').get(id);
+    if(!binding)return null;
+    const row=this.db.prepare('SELECT count(*) AS n,max(captured_at) AS newest FROM snapshots WHERE binding_id=?').get(id)!;
+    const newest=Number(row.n)>0&&row.newest!==null?String(row.newest):null;
+    const cutoff=this.now()-this.retention.staleDays*DAY;
+    return {lastUploadedAt:binding.last_uploaded_at===null||binding.last_uploaded_at===undefined?null:Number(binding.last_uploaded_at),
+      newestCapturedAt:newest,servable:newest!==null&&Date.parse(newest)>=cutoff,staleDays:this.retention.staleDays};
   }
   /** Deletes snapshots older than deleteDays and bindings revoked more than deleteDays ago. */
   purge():{snapshots:number;bindings:number} {

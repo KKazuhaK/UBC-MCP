@@ -132,16 +132,19 @@ returns only a state and a coarse age, never tokens, snapshots or course data (s
 
 | State | When | `action` |
 | --- | --- | --- |
-| `needs_setup` | No snapshot is stored for the binding | Install the UBC browser companion (`UBC_COMPANION_INSTALL_URL`) |
-| `degraded` | The newest snapshot is older than `UBC_READINESS_STALE_DAYS` | none |
-| `ready` | Otherwise | none |
+| `needs_setup` | The binding has never uploaded a snapshot | Install the UBC browser companion |
+| `ready` | The newest snapshot is within the serve window and newer than `UBC_READINESS_STALE_DAYS` | none |
+| `degraded` | Still served, but older than `UBC_READINESS_STALE_DAYS` | Open the UBC companion |
+| `expired` | The binding uploaded before, but nothing is served any more (older than `UBC_SNAPSHOT_STALE_DAYS`, or purged) | Open the UBC companion |
 
-`expires_at` is never sent because the connector's tokens do not expire; a revoked binding is a `401`. Snapshots are
-deleted after `UBC_SNAPSHOT_DELETE_DAYS`, after which a binding reads as `needs_setup` again.
+The binding's last upload time is stored on the binding and kept when snapshots are purged, which is how `expired`
+differs from `needs_setup`. Every `action.url` is `UBC_COMPANION_INSTALL_URL`. `expires_at` is never sent because the
+connector's tokens do not expire; a revoked binding is a `401`. The endpoint has its own limits (60 requests a minute
+per binding, and 60 failed authentications a minute per IP) that do not share the snapshot API's bucket.
 
 | Variable | Meaning |
 | --- | --- |
-| `UBC_READINESS_STALE_DAYS` | Age in days after which the state is `degraded`. Default 7; must not exceed `UBC_SNAPSHOT_STALE_DAYS` (14), the age at which snapshots stop being served. |
+| `UBC_READINESS_STALE_DAYS` | Whole days after which the state is `degraded`. Default 7; must not exceed `UBC_SNAPSHOT_STALE_DAYS` (14), the age at which snapshots stop being served. |
 | `UBC_COMPANION_INSTALL_URL` | https URL of the `needs_setup` action. Default: the [Browser stores](#browser-stores) section of this README. |
 
 ## Browser stores

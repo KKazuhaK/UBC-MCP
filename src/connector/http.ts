@@ -12,10 +12,33 @@ function json(res:ServerResponse,status:number,value:unknown) {
 }
 export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:McpResource|null,readinessConfig:ReadinessConfig=DEFAULT_READINESS) {
   // Snapshot reads require bearer tokens; an optional platform adapter owns its own routes and session validation.
-  const recent=new Map<string,{count:number;until:number}>();
+  const recent=new Map<string,{count:number;until:number}>(),readinessRecent=new Map<string,{count:number;until:number}>(),failedReadiness=new Map<string,{count:number;until:number}>();
   const server=createServer(async(req:IncomingMessage,res:ServerResponse)=>{
     if(req.method==='OPTIONS'&&['/v1/snapshots',...(adapter?.preflightPaths??[])].includes(req.url??'')&&isExtensionOrigin(req.headers.origin??'')&&!req.headers.cookie){
       res.writeHead(204,{'Access-Control-Allow-Origin':req.headers.origin!,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, Content-Type','Vary':'Origin'});res.end();return;
+    }
+    let pathname='';try{pathname=new URL(req.url??'/','http://connector.invalid').pathname;}catch{/* unparseable: no route matches */}
+    if(pathname==='/v1/readiness'||pathname==='/v1/readiness/') {
+      // Own limits: failed authentications per IP (token guessing), and requests per binding after authentication.
+      // Neither shares the snapshot API's per-IP bucket, so the two kinds of traffic cannot starve each other.
+      if(req.method!=='GET')return json(res,404,{error:'NOT_FOUND'});
+      if(req.headers.origin)return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
+      const now=Date.now(),ip=req.socket.remoteAddress??'unknown';
+      const bucket=(map:Map<string,{count:number;until:number}>,key:string)=>{
+        if(map.size>10000)for(const [k,v]of map)if(v.until<now)map.delete(k);
+        const prev=map.get(key);const b=prev&&prev.until>now?prev:{count:0,until:now+60_000};map.set(key,b);return b;
+      };
+      if(bucket(failedReadiness,ip).count>=60)return json(res,429,{error:'RATE_LIMITED'});
+      const token=/^Bearer ([\w-]+)$/.exec(req.headers.authorization??'')?.[1]??'';
+      const id=store.authenticate(token,'read');
+      if(!id){bucket(failedReadiness,ip).count++;return json(res,401,{error:'UNAUTHORIZED'});}
+      const b=bucket(readinessRecent,id);b.count++;
+      if(b.count>60)return json(res,429,{error:'RATE_LIMITED'});
+      try {
+        const summary=store.summary(id);
+        if(!summary)return json(res,401,{error:'UNAUTHORIZED'});
+        return json(res,200,readiness(summary,now,readinessConfig));
+      }catch{return json(res,500,{error:'INTERNAL_ERROR'});}
     }
     if (req.url==='/healthz'&&req.method==='GET') return json(res,200,{ok:true,version:VERSION});
     // The OAuth-protected MCP endpoint owns /mcp and the protected-resource metadata; it never sets CORS headers.
@@ -26,8 +49,7 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
       if(state.count>120)return json(res,429,{error:'RATE_LIMITED'});
       try{await adapter.handle(req,res,(status,value)=>json(res,status,value));}catch{if(!res.headersSent)json(res,503,{error:'SERVICE_UNAVAILABLE'});else res.end();}return;
     }
-    const readinessRoute=req.url==='/v1/readiness';
-    if (!(req.url==='/v1/snapshots'&&['GET','POST'].includes(req.method??''))&&!(readinessRoute&&req.method==='GET')) return json(res,404,{error:'NOT_FOUND'});
+    if (req.url!=='/v1/snapshots'||!['GET','POST'].includes(req.method??'')) return json(res,404,{error:'NOT_FOUND'});
     if(req.headers.origin) {
       if(req.method!=='POST'||req.headers.cookie||!isExtensionOrigin(req.headers.origin))return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
       res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');
@@ -40,7 +62,6 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
     const token=/^Bearer ([\w-]+)$/.exec(req.headers.authorization??'')?.[1]??'';
     const id=store.authenticate(token,mode);if(!id)return json(res,401,{error:'UNAUTHORIZED'});
     try {
-      if(readinessRoute)return json(res,200,readiness(store.summary(id),Date.now(),readinessConfig));
       if(mode==='read')return json(res,200,store.get(id));
       if(!req.headers['content-type']?.startsWith('application/json'))return json(res,415,{error:'JSON_REQUIRED'});
       const chunks:Buffer[]=[];let size=0;
