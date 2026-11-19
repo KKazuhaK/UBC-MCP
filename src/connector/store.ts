@@ -47,8 +47,6 @@ export class Store {
     try {
       if(!this.db.prepare('PRAGMA table_info(bindings)').all().some(c=>c.name==='revoked_at'))
         this.db.exec('ALTER TABLE bindings ADD COLUMN revoked_at INTEGER');
-      // Also repairs rows left without a time by an interrupted upgrade, and drops labels
-      // that bindings revoked before the upgrade still carry.
       // Per-binding upload time, kept when snapshots are purged so "never uploaded" stays distinguishable from "expired".
       // Existing rows are backfilled once, from their newest stored snapshot. Same transaction as above, so concurrent openers cannot both ALTER.
       if(!this.db.prepare('PRAGMA table_info(bindings)').all().some(c=>c.name==='last_uploaded_at')) {
@@ -60,6 +58,8 @@ export class Store {
         }
         for(const [id,ms]of newest)this.db.prepare('UPDATE bindings SET last_uploaded_at=? WHERE id=?').run(ms,id);
       }
+      // Also repairs rows left without a time by an interrupted upgrade, and drops labels
+      // that bindings revoked before the upgrade still carry.
       this.db.prepare("UPDATE bindings SET revoked_at=coalesce(revoked_at,?),label='' WHERE revoked=1 AND (revoked_at IS NULL OR label<>'')").run(this.now());
       this.db.exec('COMMIT');
     } catch(e) {this.db.exec('ROLLBACK');throw e;}

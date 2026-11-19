@@ -265,13 +265,36 @@ test('summary compares capture times by parsed time, not string order',t=>{
   store.put(a.id,aged(1,{capturedAt:later,academicPeriod:{id:'P2',label:'z',yearSession:'2026W',term:'2'},sections:[section({observedAt:iso(d-5000)})]}));
   assert.equal(store.summary(a.id).newestCapturedAt,later);
 });
-test('readiness: a generous per-IP cap bounds unauthenticated cost without affecting normal traffic',async t=>{
+test('readiness: no IP-keyed limit blocks valid tokens, while each binding keeps its own limit',async t=>{
   const {store}=retained(t),bindings=Array.from({length:40},(_,i)=>store.create('b'+i));
   const {ready}=await serveStore(t,store);
-  let statuses=[];for(let i=0;i<1200;i++)statuses.push((await ready(bindings[i%40].readToken)).status);
-  assert.equal(statuses.every(s=>s===200),true,'1200 requests a minute from one IP are served');
-  assert.equal((await ready(bindings[0].readToken)).status,429);
-  assert.equal((await ready('x'.repeat(43))).status,429);
+  const statuses=[];for(let i=0;i<1500;i++)statuses.push((await ready(bindings[i%40].readToken)).status);
+  assert.equal(statuses.every(s=>s===200),true,'1500 valid requests from one IP across many bindings are served');
+  let limited=0;for(let i=0;i<40;i++)if((await ready(bindings[0].readToken)).status===429)limited++;
+  assert.ok(limited>0,'one binding is still limited');
+  assert.equal((await ready(bindings[1].readToken)).status,200);
+});
+test('clientKey groups IPv6 by /64, leaves IPv4 alone and treats IPv4-mapped IPv6 as IPv4',async()=>{
+  const {clientKey}=await import('../dist/connector/limiter.js');
+  assert.equal(clientKey('203.0.113.7'),'203.0.113.7');
+  assert.equal(clientKey('::ffff:203.0.113.7'),'203.0.113.7');
+  assert.equal(clientKey('2001:db8:1:2:aaaa:bbbb:cccc:dddd'),clientKey('2001:db8:1:2::1'));
+  assert.equal(clientKey('2001:DB8:1:2::1'),clientKey('2001:db8:1:2:0:0:0:9'));
+  assert.notEqual(clientKey('2001:db8:1:2::1'),clientKey('2001:db8:1:3::1'));
+  assert.equal(clientKey('::1'),clientKey('0:0:0:0:ffff::1'));
+  assert.equal(clientKey('fe80::1%en0'),clientKey('fe80::2'));
+  assert.equal(clientKey('unknown'),'unknown');
+  assert.notEqual(clientKey('203.0.113.7'),clientKey('203.0.113.8'));
+});
+test('readiness failed-auth guard counts an IPv6 /64 as one client',async t=>{
+  const {store}=retained(t),a=store.create('a');
+  const server=connectorServer(store,null,null);
+  try{await new Promise((r,j)=>{server.once('error',j);server.listen(0,'::1',r);});}catch{t.skip('IPv6 loopback unavailable');return;}
+  t.after(()=>new Promise(r=>server.close(r)));
+  const url=`http://[::1]:${server.address().port}/v1/readiness`;
+  let throttled=false;for(let i=0;i<100&&!throttled;i++)throttled=(await fetch(url,{headers:{Authorization:'Bearer '+'x'.repeat(43)}})).status===429;
+  assert.ok(throttled);
+  assert.equal((await fetch(url,{headers:{Authorization:`Bearer ${a.readToken}`}})).status,200);
 });
 test('Limiter evicts the oldest key at its cap, replaces expired windows and never scans',async()=>{
   const {Limiter}=await import('../dist/connector/limiter.js');

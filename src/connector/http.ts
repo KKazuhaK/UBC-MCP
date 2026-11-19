@@ -5,7 +5,7 @@ import {Store} from './store.js';
 import type {PlatformAdapter} from './adapters/index.js';
 import type {McpResource} from './mcp-http.js';
 import {VERSION} from '../version.js';
-import {Limiter} from './limiter.js';
+import {Limiter,clientKey} from './limiter.js';
 import {DEFAULT_READINESS,readiness} from './readiness.js';
 import type {ReadinessConfig} from './readiness.js';
 function json(res:ServerResponse,status:number,value:unknown) {
@@ -13,7 +13,7 @@ function json(res:ServerResponse,status:number,value:unknown) {
 }
 export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:McpResource|null,readinessConfig:ReadinessConfig=DEFAULT_READINESS) {
   // Snapshot reads require bearer tokens; an optional platform adapter owns its own routes and session validation.
-  const recent=new Map<string,{count:number;until:number}>(),readinessRecent=new Limiter(),failedReadiness=new Limiter(),readinessPerIp=new Limiter();
+  const recent=new Map<string,{count:number;until:number}>(),readinessRecent=new Limiter(),failedReadiness=new Limiter();
   const server=createServer(async(req:IncomingMessage,res:ServerResponse)=>{
     if(req.method==='OPTIONS'&&['/v1/snapshots',...(adapter?.preflightPaths??[])].includes(req.url??'')&&isExtensionOrigin(req.headers.origin??'')&&!req.headers.cookie){
       res.writeHead(204,{'Access-Control-Allow-Origin':req.headers.origin!,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, Content-Type','Vary':'Origin'});res.end();return;
@@ -24,9 +24,7 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
       // Neither shares the snapshot API's per-IP bucket, so the two kinds of traffic cannot starve each other.
       if(req.method!=='GET')return json(res,404,{error:'NOT_FOUND'});
       if(req.headers.origin)return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
-      const now=Date.now(),ip=req.socket.remoteAddress??'unknown';
-      // Bounds the sha256 and lookup spent on unauthenticated traffic. Far above what one MCPHub (or one proxy IP) sends.
-      if(++readinessPerIp.get(ip,now).count>1200)return json(res,429,{error:'RATE_LIMITED'});
+      const now=Date.now(),ip=clientKey(req.socket.remoteAddress??'unknown');
       const token=/^Bearer ([\w-]+)$/.exec(req.headers.authorization??'')?.[1]??'';
       const id=store.authenticate(token,'read');
       if(!id) {

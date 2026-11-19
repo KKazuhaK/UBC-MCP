@@ -140,8 +140,7 @@ returns only a state and a coarse age, never tokens, snapshots or course data (s
 The binding's last upload time is stored on the binding and kept when snapshots are purged, which is how `expired`
 differs from `needs_setup`. Bindings whose snapshots were already purged before this version have no upload time to
 recover, so they read `needs_setup` until their next upload. Every `action.url` is `UBC_COMPANION_INSTALL_URL`. `expires_at` is never sent because the
-connector's tokens do not expire; a revoked binding is a `401`. The endpoint has its own limits (1200 requests a minute
-per IP before authentication, 60 requests a minute per binding, and 60 failed authentications a minute per IP, which never blocks a valid token) that do not share the snapshot API's bucket.
+connector's tokens do not expire; a revoked binding is a `401`. The endpoint has its own limits, separate from the snapshot API's: 60 requests a minute per binding after authentication, and 60 failed authentications a minute per client (IPv6 clients are grouped by /64, IPv4-mapped addresses count as IPv4). Valid tokens are never blocked by the failure limit, and there is no per-IP cap before authentication, so flood protection belongs to the reverse proxy.
 
 | Variable | Meaning |
 | --- | --- |
