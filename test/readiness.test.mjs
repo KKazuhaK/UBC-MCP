@@ -213,3 +213,13 @@ test('cli serve wires readinessFromEnv: bad values refuse to start, the threshol
   let body;for(let i=0;i<100&&!body;i++){try{const r=await fetch(`http://127.0.0.1:${port}/v1/readiness`,{headers:{Authorization:`Bearer ${a.readToken}`}});body=await r.json();}catch{await new Promise(r=>setTimeout(r,50));}}
   assert.equal(body?.state,'degraded');assert.equal(body.action.url,'https://example.org/companion');
 });
+test('readiness: an IP over its failure limit still gets 200 for a valid token, while more bad tokens get 429',async t=>{
+  const {store}=retained(t),a=store.create('a');store.put(a.id,aged(1));
+  const {ready}=await serveStore(t,store);
+  let throttled=false;for(let i=0;i<100&&!throttled;i++)throttled=(await ready('x'.repeat(43))).status===429;
+  assert.ok(throttled,'failure limit reached');
+  assert.equal((await ready('y'.repeat(43))).status,429);
+  assert.equal((await ready(a.readToken)).status,200);
+  assert.equal((await ready('z'.repeat(43))).status,429);
+  assert.equal((await ready(a.readToken)).status,200);
+});

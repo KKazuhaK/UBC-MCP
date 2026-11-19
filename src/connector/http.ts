@@ -28,10 +28,14 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
         if(map.size>10000)for(const [k,v]of map)if(v.until<now)map.delete(k);
         const prev=map.get(key);const b=prev&&prev.until>now?prev:{count:0,until:now+60_000};map.set(key,b);return b;
       };
-      if(bucket(failedReadiness,ip).count>=60)return json(res,429,{error:'RATE_LIMITED'});
       const token=/^Bearer ([\w-]+)$/.exec(req.headers.authorization??'')?.[1]??'';
       const id=store.authenticate(token,'read');
-      if(!id){bucket(failedReadiness,ip).count++;return json(res,401,{error:'UNAUTHORIZED'});}
+      if(!id) {
+        // Behind a proxy every client shares one IP, so failures may throttle other failures but never a valid token.
+        const failures=bucket(failedReadiness,ip);
+        if(failures.count>=60)return json(res,429,{error:'RATE_LIMITED'});
+        failures.count++;return json(res,401,{error:'UNAUTHORIZED'});
+      }
       const b=bucket(readinessRecent,id);b.count++;
       if(b.count>60)return json(res,429,{error:'RATE_LIMITED'});
       try {
