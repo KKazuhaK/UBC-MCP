@@ -148,7 +148,9 @@ operator of the MCPHub you entered. It:
   for rate limiting.
 
 **Who can read it.** Anyone holding your connection's read credential, which
-MCPHub stores for you; and, if the connector's own MCP endpoint is enabled, any
+MCPHub stores for you (when the connector's MCP endpoint is used with MCPHub as
+the sign-in service, no read credential is stored in MCPHub at all: MCPHub asks
+the connector with an access token it issues for you); and, if the connector's own MCP endpoint is enabled, any
 MCP client signed in through the configured sign-in service as your account.
 When an MCP client or AI assistant you connect uses the UBC personal tools,
 your snapshots are passed to that client, and from there to its AI provider

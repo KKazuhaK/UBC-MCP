@@ -6,6 +6,8 @@ import {parseSnapshot} from '../model.js';
 import type {Snapshot} from '../model.js';
 
 export const normalizeIssuer=(s:string)=>s.endsWith('/')?s.slice(0,-1):s;
+/** Account key for one issuer and subject claim; the default claim `sub` keeps the plain issuer as its key. */
+export const issuerKey=(issuer:string,claim='sub')=>claim==='sub'?normalizeIssuer(issuer):`${normalizeIssuer(issuer)}#${claim}`;
 const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
 const DAY=86_400_000;
 /** Snapshots older than staleDays are not served; older than deleteDays they, and revoked bindings, are deleted. */
@@ -150,8 +152,8 @@ export class Store {
     return this.accountIn(username,'',create,null);
   }
   /** An account created for one issuer+sub pair (standalone use; see link-account). */
-  linkedAccount(issuer:string,sub:string,create=false):{id:string;readToken:string;uploadToken:string}|null {
-    const key=normalizeIssuer(issuer);return this.accountIn(sub,key,create,key);
+  linkedAccount(issuer:string,sub:string,create=false,claim='sub'):{id:string;readToken:string;uploadToken:string}|null {
+    const issuerName=normalizeIssuer(issuer);return this.accountIn(sub,issuerKey(issuerName,claim),create,issuerName);
   }
   private accountIn(username:string,key:string,create:boolean,issuer:string|null) {
     const row=this.db.prepare('SELECT a.binding_id,a.credentials FROM accounts a JOIN bindings b ON b.id=a.binding_id WHERE a.username=? AND a.issuer_key=? AND b.revoked=0').get(username,key);
@@ -175,9 +177,11 @@ export class Store {
    * platform account with no recorded issuer; the caller must decide whether
    * the issuer is the platform's own authority before using it.
    */
-  accountForIssuer(iss:string,sub:string):{account:{id:string;readToken:string;uploadToken:string};via:'issuer'|'legacy'}|null {
-    const issuer=normalizeIssuer(iss),linked=this.accountIn(sub,issuer,false,issuer);
+  accountForIssuer(iss:string,sub:string,claim='sub'):{account:{id:string;readToken:string;uploadToken:string};via:'issuer'|'legacy'}|null {
+    const issuer=normalizeIssuer(iss),linked=this.accountIn(sub,issuerKey(issuer,claim),false,issuer);
     if(linked)return {account:linked,via:'issuer'};
+    // A subject that is not the username never falls back to the username namespace; adopt() moves accounts explicitly.
+    if(claim!=='sub')return null;
     const row=this.db.prepare("SELECT issuer FROM accounts WHERE username=? AND issuer_key=''").get(sub);
     if(!row)return null;
     const recorded=row.issuer===null||row.issuer===undefined?null:String(row.issuer);
@@ -185,8 +189,37 @@ export class Store {
     const account=this.accountIn(sub,'',false,null);
     return account?{account,via:recorded===null?'legacy':'issuer'}:null;
   }
-  pair(username:string) {
-    const a=this.account(username);if(!a)throw new Error('Not connected');
+  /**
+   * Moves an active username-keyed platform account to the key of a stable
+   * subject (for example MCPHub's user id), the first time that subject is seen (with the claim `sub` the subject is the username and the account just gains its issuer key).
+   * It acts only when the account's recorded issuer is this issuer, or for an
+   * account with no recorded issuer when `legacyAllowed` confirms the issuer is
+   * the platform's own authority. If an account for the subject already exists
+   * nothing is moved or merged. Returns whether an account was moved.
+   */
+  async adopt(iss:string,claim:string,subject:string,username:string,legacyAllowed:()=>Promise<boolean>):Promise<boolean> {
+    // With the plain `sub` claim the subject is the username itself; only the issuer binding is added.
+    if(claim==='sub'&&subject!==username)return false;
+    const issuer=normalizeIssuer(iss),key=issuerKey(issuer,claim);
+    const exists=()=>!!this.db.prepare('SELECT 1 FROM accounts WHERE username=? AND issuer_key=?').get(subject,key);
+    const old=()=>this.db.prepare("SELECT a.binding_id,a.credentials,a.issuer FROM accounts a JOIN bindings b ON b.id=a.binding_id WHERE a.username=? AND a.issuer_key='' AND b.revoked=0").get(username);
+    if(exists())return false;
+    const first=old();if(!first)return false;
+    const recorded=first.issuer===null||first.issuer===undefined?null:String(first.issuer);
+    if(recorded!==null&&recorded!==issuer)return false;
+    if(recorded===null&&!(await legacyAllowed()))return false;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const row=old();
+      if(exists()||!row||String(row.binding_id)!==String(first.binding_id)||(row.issuer!==null&&row.issuer!==undefined&&String(row.issuer)!==issuer)){this.db.exec('ROLLBACK');return false;}
+      const id=String(row.binding_id),credentials=this.seal(this.unseal(String(row.credentials),`account:${username}:${id}`),`account:${subject}:${id}`);
+      this.db.prepare("UPDATE accounts SET username=?,issuer_key=?,issuer=?,credentials=? WHERE username=? AND issuer_key='' AND binding_id=?").run(subject,key,issuer,credentials,username,id);
+      this.db.exec('COMMIT');return true;
+    }catch(e){try{this.db.exec('ROLLBACK');}catch{/* already ended */}throw e;}
+  }
+  /** Pairing code for an account: the username's platform account, or with `issuer` the account linked to that issuer+subject. */
+  pair(username:string,issuer?:{issuer:string;claim?:string}) {
+    const a=issuer?this.linkedAccount(issuer.issuer,username,false,issuer.claim):this.account(username);if(!a)throw new Error('Not connected');
     const code=randomBytes(32).toString('base64url'),expires=Date.now()+5*60_000;
     this.db.prepare('DELETE FROM pairing WHERE binding_id=? OR expires<?').run(a.id,Date.now());
     this.db.prepare('INSERT INTO pairing VALUES(?,?,?)').run(digest(code),a.id,expires);
@@ -194,10 +227,11 @@ export class Store {
   }
   claim(code:string) {
     if(!/^[\w-]{43}$/.test(code))return null;
-    const row=this.db.prepare('SELECT p.binding_id,a.username FROM pairing p JOIN accounts a ON a.binding_id=p.binding_id JOIN bindings b ON b.id=p.binding_id WHERE p.code_hash=? AND p.expires>? AND b.revoked=0').get(digest(code),Date.now());
+    const row=this.db.prepare('SELECT p.binding_id,a.username,a.credentials FROM pairing p JOIN accounts a ON a.binding_id=p.binding_id JOIN bindings b ON b.id=p.binding_id WHERE p.code_hash=? AND p.expires>? AND b.revoked=0').get(digest(code),Date.now());
     if(!row)return null;
     this.db.prepare('DELETE FROM pairing WHERE code_hash=?').run(digest(code));
-    return {uploadToken:this.account(String(row.username))!.uploadToken};
+    // Found by binding id, so it works for linked accounts as well as username-keyed ones.
+    return {uploadToken:JSON.parse(this.unseal(String(row.credentials),`account:${row.username}:${row.binding_id}`)).uploadToken as string};
   }
   close(){this.db.close();}
 }

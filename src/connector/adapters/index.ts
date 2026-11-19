@@ -2,6 +2,7 @@ import type {IncomingMessage,ServerResponse} from 'node:http';
 import type {Store} from '../store.js';
 import {mcphubAdapter} from './mcphub.js';
 import {mcphubOAuthAdapter} from './mcphub-oauth.js';
+import {mcpConfigFromEnv} from '../mcp-http.js';
 
 /**
  * A platform adapter lets a hosting platform (for example an MCP aggregator)
@@ -36,6 +37,9 @@ const KNOWN=['mcphub','mcphub-oauth'];
  *         Requires UBC_PLATFORM_URL, UBC_PUBLIC_ORIGIN (https, or http on loopback),
  *         UBC_OAUTH_CLIENT_ID and UBC_SESSION_SECRET (at least 32 bytes);
  *         optional UBC_OAUTH_CLIENT_SECRET and UBC_PLATFORM_SERVER_NAME.
+ *         With UBC_MCP_HTTP=on it only signs users in (a token for the MCP resource,
+ *         verified offline; no credential scope, no write to the platform) and keys accounts by UBC_OAUTH_ISSUER and
+ *         UBC_OAUTH_SUBJECT_CLAIM, like the remote MCP endpoint.
  */
 export function adapterFromEnv(store:Store,env:AdapterEnv=process.env,warn:(message:string)=>void=m=>console.error(m)):PlatformAdapter|null {
   let name=(env.UBC_PLATFORM_ADAPTER??'').trim().toLowerCase(),wasAuto=false;
@@ -51,7 +55,9 @@ export function adapterFromEnv(store:Store,env:AdapterEnv=process.env,warn:(mess
   if(name==='mcphub-oauth') {
     const need=(key:string)=>{const v=env[key];if(!v)throw new Error(`UBC_PLATFORM_ADAPTER=mcphub-oauth requires ${key}`);return v;};
     const secret=env.UBC_OAUTH_CLIENT_SECRET;
-    return mcphubOAuthAdapter(store,{origin:need('UBC_PUBLIC_ORIGIN'),platformUrl:need('UBC_PLATFORM_URL'),clientId:need('UBC_OAUTH_CLIENT_ID'),sessionSecret:need('UBC_SESSION_SECRET'),...(secret?{clientSecret:secret}:{}),...(env.UBC_PLATFORM_SERVER_NAME?{serverName:env.UBC_PLATFORM_SERVER_NAME}:{}),warn});
+    // With the remote MCP endpoint on, the platform reaches the connector through it, so this adapter only signs users in.
+    const mcp=mcpConfigFromEnv(env);
+    return mcphubOAuthAdapter(store,{origin:need('UBC_PUBLIC_ORIGIN'),platformUrl:need('UBC_PLATFORM_URL'),clientId:need('UBC_OAUTH_CLIENT_ID'),sessionSecret:need('UBC_SESSION_SECRET'),...(secret?{clientSecret:secret}:{}),...(mcp?{signInOnly:true,issuer:mcp.issuer,subjectClaim:mcp.subjectClaim,resource:mcp.resource,audience:mcp.audience,requireAtJwt:mcp.requireAtJwt}:{}),...(env.UBC_PLATFORM_SERVER_NAME?{serverName:env.UBC_PLATFORM_SERVER_NAME}:{}),warn});
   }
   const origin=env.UBC_PUBLIC_ORIGIN;
   if(!origin)throw new Error('UBC_PLATFORM_ADAPTER=mcphub requires UBC_PUBLIC_ORIGIN');

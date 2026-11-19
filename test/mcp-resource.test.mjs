@@ -76,7 +76,7 @@ test('the endpoint is off by default: /mcp and the metadata do not exist',async 
 test('configuration is validated at startup',()=>{
   const ok={UBC_MCP_HTTP:'on',UBC_PUBLIC_ORIGIN:'https://ubc.example.test',UBC_OAUTH_ISSUER:'https://auth.example.test'};
   assert.deepEqual(mcpConfigFromEnv(ok),{origin:'https://ubc.example.test',issuer:'https://auth.example.test',resource:'https://ubc.example.test/mcp',audience:'https://ubc.example.test/mcp',
-    requireAtJwt:true,trustProxy:0,platformUrl:'https://ubc.example.test'});  // legacy auto-enable of the mcphub adapter points at the origin
+    requireAtJwt:true,subjectClaim:'sub',trustProxy:0,platformUrl:'https://ubc.example.test'});  // legacy auto-enable of the mcphub adapter points at the origin
   assert.equal(mcpConfigFromEnv({...ok,UBC_PLATFORM_ADAPTER:'none'}).platformUrl,null);
   assert.equal(mcpConfigFromEnv({...ok,UBC_PLATFORM_ADAPTER:'mcphub-oauth',UBC_PLATFORM_URL:'http://hub:3000/'}).platformUrl,'http://hub:3000');
   assert.equal(mcpConfigFromEnv({...ok,UBC_TRUST_PROXY:'2',UBC_OAUTH_REQUIRE_AT_JWT:'false'}).trustProxy,2);
@@ -101,7 +101,7 @@ test('protected resource metadata (RFC 9728) has the contracted shape',async t=>
 test('no token: 401 with the resource_metadata challenge and no error code',async t=>{
   const s=await setup(t);
   const r=await rpc(s.url,null);assert.equal(r.status,401);
-  assert.equal(r.headers.get('www-authenticate'),`Bearer resource_metadata="${s.origin}/.well-known/oauth-protected-resource"`);
+  assert.equal(r.headers.get('www-authenticate'),`Bearer resource_metadata="${s.origin}/.well-known/oauth-protected-resource/mcp"`);
   assert.equal((await fetch(s.url,{headers:{Authorization:'Basic dXNlcjpwdw=='}})).status,401);
   assert.equal(s.issuer.hits,0);
 });
@@ -157,7 +157,7 @@ test('invalid tokens are refused with 401 invalid_token',async t=>{
   };
   for(const [name,token] of Object.entries(cases)) {
     const r=await rpc(s.url,token);assert.equal(r.status,401,name);
-    assert.equal(r.headers.get('www-authenticate'),`Bearer error="invalid_token", resource_metadata="${s.origin}/.well-known/oauth-protected-resource"`,name);
+    assert.equal(r.headers.get('www-authenticate'),`Bearer error="invalid_token", resource_metadata="${s.origin}/.well-known/oauth-protected-resource/mcp"`,name);
     assert.doesNotMatch(await r.text(),/ALICE/,name);
   }
   const miss=await s.mint('alice',{});const noSub=await new SignJWT({}).setProtectedHeader({alg:'ES256',typ:'at+jwt',kid:'es-1'}).setIssuer(s.issuer.url).setAudience(s.resource).setExpirationTime(now()+300).sign(s.issuer.es.privateKey);
@@ -237,8 +237,10 @@ test('legacy (issuer-less) platform accounts match only when the issuer is the p
   const rec=await setup(t,{over:()=>({platformUrl:null})});legacy(rec.store,'lee');rec.store.recordIssuer('lee',rec.issuer.url+'/');
   const c4=await client(rec.url,await rec.mint('lee'));t.after(()=>c4.close());
   assert.equal(data(await c4.callTool({name:'search_sections',arguments:args})).sections[0].title,'LEGACY-TITLE');
-  rec.store.recordIssuer('lee','https://elsewhere.example');
-  assert.equal(JSON.parse(text(await c4.callTool({name:'search_sections',arguments:args}))).error,'CONNECTION_REVOKED');
+  // The first match moved the account to the issuer-bound key; one recorded for another issuer is never matched.
+  const other=await setup(t,{over:()=>({platformUrl:null})});legacy(other.store,'lee');other.store.recordIssuer('lee','https://elsewhere.example');
+  const c5=await client(other.url,await other.mint('lee'));t.after(()=>c5.close());
+  assert.equal(JSON.parse(text(await c5.callTool({name:'search_sections',arguments:args}))).error,'CONNECTION_REVOKED');
 });
 test('link-account creates an issuer-bound account and prints an upload token',async t=>{
   const s=await setup(t),dir=mkdtempSync(join(tmpdir(),'ubc-link-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
