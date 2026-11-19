@@ -7,11 +7,18 @@ export const DEFAULT_INSTALL_URL='https://github.com/KKazuhaK/UBC-MCP#browser-st
 export type ReadinessConfig={staleDays:number;installUrl:string};
 /** Data older than a week is flagged: the connector stops serving it at 14 days, so users get a week of warning. */
 export const DEFAULT_READINESS:ReadinessConfig={staleDays:7,installUrl:DEFAULT_INSTALL_URL};
-/** UBC_READINESS_STALE_DAYS (default 7, at most the snapshot stale window) and UBC_COMPANION_INSTALL_URL (https). */
+/**
+ * UBC_READINESS_STALE_DAYS and UBC_COMPANION_INSTALL_URL (https). Unset, the threshold is min(7, the snapshot stale window),
+ * so any valid retention setting starts; set explicitly it must be a whole number of days within the snapshot stale window.
+ */
 export function readinessFromEnv(env:Record<string,string|undefined>=process.env,retention?:Pick<Retention,'staleDays'>):ReadinessConfig {
-  const raw=(env.UBC_READINESS_STALE_DAYS??'').trim();let staleDays=DEFAULT_READINESS.staleDays;
-  if(raw){if(!/^[1-9]\d{0,3}$/.test(raw))throw new Error('UBC_READINESS_STALE_DAYS must be a positive whole number of days');staleDays=Number(raw);}
-  if(retention&&staleDays>retention.staleDays)throw new Error('UBC_READINESS_STALE_DAYS must not exceed UBC_SNAPSHOT_STALE_DAYS');
+  const raw=(env.UBC_READINESS_STALE_DAYS??'').trim();
+  let staleDays=Math.min(DEFAULT_READINESS.staleDays,retention?.staleDays??Infinity);
+  if(raw){
+    if(!/^[1-9]\d{0,3}$/.test(raw))throw new Error('UBC_READINESS_STALE_DAYS must be a positive whole number of days');
+    staleDays=Number(raw);
+    if(retention&&staleDays>retention.staleDays)throw new Error('UBC_READINESS_STALE_DAYS must not exceed UBC_SNAPSHOT_STALE_DAYS');
+  }
   const url=(env.UBC_COMPANION_INSTALL_URL??'').trim();
   if(url){let u:URL;try{u=new URL(url);}catch{throw new Error('UBC_COMPANION_INSTALL_URL must be an https URL');}
     if(u.protocol!=='https:'||u.username||u.password)throw new Error('UBC_COMPANION_INSTALL_URL must be an https URL');}
@@ -31,7 +38,7 @@ export function readiness(summary:ReadinessSummary,now:number,config:ReadinessCo
     return {version:1,state:'needs_setup',summary:'No course data has been uploaded yet. Install the UBC browser companion and sync from Workday.',
       action:{label:'Install the UBC browser companion',url:config.installUrl},checked_at};
   if(!summary.servable||!summary.newestCapturedAt)
-    return {version:1,state:'expired',summary:`Course data is older than ${summary.staleDays} days and no longer used — open the UBC companion to sync again`,action,checked_at};
+    return {version:1,state:'expired',summary:`Course data is older than ${windowText(summary.staleDays)} and no longer used — open the UBC companion to sync again`,action,checked_at};
   const age=freshness(summary.newestCapturedAt,now,config.staleDays*DAY/1000);
   if(age.stale) {
     const days=Math.floor(age.ageSeconds*1000/DAY),hours=Math.floor(age.ageSeconds/3600);
@@ -40,3 +47,5 @@ export function readiness(summary:ReadinessSummary,now:number,config:ReadinessCo
   }
   return {version:1,state:'ready',checked_at};
 }
+/** A whole number of days, otherwise hours: "5 days", "1 day", "12 hours", "36 hours". */
+const windowText=(days:number)=>days>=1&&Number.isInteger(days)?plural(days,'day'):plural(Math.max(1,Math.round(days*24)),'hour');

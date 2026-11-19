@@ -5,6 +5,7 @@ import {Store} from './store.js';
 import type {PlatformAdapter} from './adapters/index.js';
 import type {McpResource} from './mcp-http.js';
 import {VERSION} from '../version.js';
+import {Limiter} from './limiter.js';
 import {DEFAULT_READINESS,readiness} from './readiness.js';
 import type {ReadinessConfig} from './readiness.js';
 function json(res:ServerResponse,status:number,value:unknown) {
@@ -12,7 +13,7 @@ function json(res:ServerResponse,status:number,value:unknown) {
 }
 export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:McpResource|null,readinessConfig:ReadinessConfig=DEFAULT_READINESS) {
   // Snapshot reads require bearer tokens; an optional platform adapter owns its own routes and session validation.
-  const recent=new Map<string,{count:number;until:number}>(),readinessRecent=new Map<string,{count:number;until:number}>(),failedReadiness=new Map<string,{count:number;until:number}>();
+  const recent=new Map<string,{count:number;until:number}>(),readinessRecent=new Limiter(),failedReadiness=new Limiter(),readinessPerIp=new Limiter();
   const server=createServer(async(req:IncomingMessage,res:ServerResponse)=>{
     if(req.method==='OPTIONS'&&['/v1/snapshots',...(adapter?.preflightPaths??[])].includes(req.url??'')&&isExtensionOrigin(req.headers.origin??'')&&!req.headers.cookie){
       res.writeHead(204,{'Access-Control-Allow-Origin':req.headers.origin!,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, Content-Type','Vary':'Origin'});res.end();return;
@@ -24,19 +25,17 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
       if(req.method!=='GET')return json(res,404,{error:'NOT_FOUND'});
       if(req.headers.origin)return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
       const now=Date.now(),ip=req.socket.remoteAddress??'unknown';
-      const bucket=(map:Map<string,{count:number;until:number}>,key:string)=>{
-        if(map.size>10000)for(const [k,v]of map)if(v.until<now)map.delete(k);
-        const prev=map.get(key);const b=prev&&prev.until>now?prev:{count:0,until:now+60_000};map.set(key,b);return b;
-      };
+      // Bounds the sha256 and lookup spent on unauthenticated traffic. Far above what one MCPHub (or one proxy IP) sends.
+      if(++readinessPerIp.get(ip,now).count>1200)return json(res,429,{error:'RATE_LIMITED'});
       const token=/^Bearer ([\w-]+)$/.exec(req.headers.authorization??'')?.[1]??'';
       const id=store.authenticate(token,'read');
       if(!id) {
         // Behind a proxy every client shares one IP, so failures may throttle other failures but never a valid token.
-        const failures=bucket(failedReadiness,ip);
+        const failures=failedReadiness.get(ip,now);
         if(failures.count>=60)return json(res,429,{error:'RATE_LIMITED'});
         failures.count++;return json(res,401,{error:'UNAUTHORIZED'});
       }
-      const b=bucket(readinessRecent,id);b.count++;
+      const b=readinessRecent.get(id,now);b.count++;
       if(b.count>60)return json(res,429,{error:'RATE_LIMITED'});
       try {
         const summary=store.summary(id);

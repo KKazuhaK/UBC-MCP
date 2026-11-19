@@ -223,3 +223,73 @@ test('readiness: an IP over its failure limit still gets 200 for a valid token, 
   assert.equal((await ready('z'.repeat(43))).status,429);
   assert.equal((await ready(a.readToken)).status,200);
 });
+
+// ---- second review ----
+const runServe=(t,env)=>{
+  const child=spawn(process.execPath,['dist/connector/cli.js','serve'],{env:{...process.env,...env},stdio:['ignore','pipe','pipe']});
+  let err='';child.stderr.on('data',d=>err+=d);t.after(()=>child.kill());
+  return {err:()=>err,exit:new Promise(r=>child.on('exit',c=>r(c)))};
+};
+const fetchWhenUp=async(url,token)=>{for(let i=0;i<100;i++){try{return await fetch(url,{headers:{Authorization:`Bearer ${token}`}});}catch{await new Promise(r=>setTimeout(r,50));}}};
+test('readiness default threshold follows a short snapshot stale window instead of refusing to start',()=>{
+  assert.equal(readinessFromEnv({},{staleDays:5,deleteDays:30}).staleDays,5);
+  assert.equal(readinessFromEnv({},{staleDays:0.5,deleteDays:30}).staleDays,0.5);
+  assert.equal(readinessFromEnv({},{staleDays:30,deleteDays:30}).staleDays,7);
+  assert.equal(readinessFromEnv({UBC_READINESS_STALE_DAYS:'3'},{staleDays:5,deleteDays:30}).staleDays,3);
+  assert.throws(()=>readinessFromEnv({UBC_READINESS_STALE_DAYS:'9'},{staleDays:5,deleteDays:30}),/must not exceed/);
+});
+test('cli serve starts with UBC_SNAPSHOT_STALE_DAYS of 5 or 0.5 and no explicit readiness days; explicit 9 with 5 exits 1',async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'ubc-cli-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const seed=new Store(dir),a=seed.create('a');seed.close();
+  for(const stale of ['5','0.5']){
+    const port=await freePort();runServe(t,{UBC_DATA_DIR:dir,UBC_CONNECTOR_PORT:String(port),UBC_SNAPSHOT_STALE_DAYS:stale});
+    const res=await fetchWhenUp(`http://127.0.0.1:${port}/v1/readiness`,a.readToken);
+    assert.equal(res?.status,200,`stale ${stale}`);assert.equal((await res.json()).state,'needs_setup');
+  }
+  const bad=runServe(t,{UBC_DATA_DIR:dir,UBC_CONNECTOR_PORT:String(await freePort()),UBC_SNAPSHOT_STALE_DAYS:'5',UBC_READINESS_STALE_DAYS:'9'});
+  assert.equal(await bad.exit,1);assert.match(bad.err(),/must not exceed/);
+});
+test('readiness: expired summary formats fractional windows sensibly',async t=>{
+  const text=async days=>{const {store}=retained(t,days,30),a=store.create('a');store.put(a.id,aged(10));
+    const {ready}=await serveStore(t,store,{...DEFAULT_READINESS,staleDays:days});return (await (await ready(a.readToken)).json()).summary;};
+  assert.match(await text(0.5),/older than 12 hours and/);
+  assert.match(await text(1),/older than 1 day and/);
+  assert.match(await text(1.5),/older than 36 hours and/);
+  assert.match(await text(5),/older than 5 days and/);
+});
+test('summary compares capture times by parsed time, not string order',t=>{
+  const {store}=retained(t),a=store.create('a'),d=Date.now()-DAY,iso=ms=>new Date(ms).toISOString();
+  const plain=iso(Math.floor(d/1000)*1000).replace('.000Z','Z'),later=iso(Math.floor(d/1000)*1000+500);
+  assert.ok(later.endsWith('.500Z')&&plain>later,'string order would pick the earlier time');
+  store.put(a.id,aged(1,{capturedAt:plain,sections:[section({observedAt:iso(d-5000)})]}));
+  store.put(a.id,aged(1,{capturedAt:later,academicPeriod:{id:'P2',label:'z',yearSession:'2026W',term:'2'},sections:[section({observedAt:iso(d-5000)})]}));
+  assert.equal(store.summary(a.id).newestCapturedAt,later);
+});
+test('readiness: a generous per-IP cap bounds unauthenticated cost without affecting normal traffic',async t=>{
+  const {store}=retained(t),bindings=Array.from({length:40},(_,i)=>store.create('b'+i));
+  const {ready}=await serveStore(t,store);
+  let statuses=[];for(let i=0;i<1200;i++)statuses.push((await ready(bindings[i%40].readToken)).status);
+  assert.equal(statuses.every(s=>s===200),true,'1200 requests a minute from one IP are served');
+  assert.equal((await ready(bindings[0].readToken)).status,429);
+  assert.equal((await ready('x'.repeat(43))).status,429);
+});
+test('Limiter evicts the oldest key at its cap, replaces expired windows and never scans',async()=>{
+  const {Limiter}=await import('../dist/connector/limiter.js');
+  const l=new Limiter(3,1000);
+  for(const k of ['a','b','c','d','e'])l.get(k,0).count++;
+  assert.equal(l.size,3);assert.equal(l.get('e',1).count,1);assert.equal(l.get('a',1).count,0,'oldest evicted, recreated fresh');
+  assert.equal(l.size,3);
+  assert.equal(l.get('e',2000).count,0,'an expired window starts over');assert.equal(l.size,3);
+});
+test('two processes opening the same old database both migrate it without a duplicate-column error',async t=>{
+  const script=`import {Store} from './dist/connector/store.js';const s=new Store(process.argv[1]);s.close();`;
+  for(let round=0;round<6;round++){
+    const dir=mkdtempSync(join(tmpdir(),'ubc-mig-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+    const first=new Store(dir),a=first.create('a');first.put(a.id,aged(1));first.close();
+    const db=new DatabaseSync(join(dir,'connector.sqlite'));db.exec('ALTER TABLE bindings DROP COLUMN last_uploaded_at');db.close();
+    const kids=[0,1,2].map(()=>{const c=spawn(process.execPath,['--input-type=module','-e',script,dir],{stdio:['ignore','ignore','pipe']});let err='';c.stderr.on('data',d=>err+=d);
+      return new Promise(r=>c.on('exit',code=>r({code,err})));});
+    for(const r of await Promise.all(kids))assert.equal(r.code,0,r.err);
+    const check=new Store(dir);try{assert.ok(check.summary(a.id).lastUploadedAt);}finally{check.close();}
+  }
+});
