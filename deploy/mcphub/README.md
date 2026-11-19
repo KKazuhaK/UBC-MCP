@@ -4,7 +4,7 @@ The target is the existing MCPHub at `https://mcp.kazuhahub.com/`. Hub owns remo
 client authentication. UBC runs as a stdio child and does not need a second OAuth
 server or public MCP port. Preserve existing server definitions and user bindings.
 
-## Public alpha
+## Public profile
 
 Build and package with `npm ci`, `npm run build`, and `npm pack`. Publish the
 reviewed compiled `.tgz` as a versioned release asset, record its SHA-256 and pin
@@ -20,7 +20,7 @@ For a source-bundled image, `mcp_settings.bundled.example.json` expects a compil
 checkout with production dependencies at `/opt/mcp/ubc` and Node 24 at
 `/opt/mcp/bin/node24`. This file is a template, not a record of deployed state.
 
-## Personal alpha
+## Personal profile
 
 Run the connector as a separate container using `deploy/compose.yaml`. The
 selected production deployment uses this isolation because Hub and its stdio
@@ -50,7 +50,7 @@ with data custody; encryption does not hide snapshots from the host operator.
 
 ## Acceptance and rollback
 
-1. Public stdio entry reports version `0.1.0-alpha.1` and seven read-only tools.
+1. Public stdio entry reports the `package.json` version of the installed release and seven read-only tools.
 2. Call `get_course` for Vancouver CPSC 210 and `get_course_grades` for an available
    historical session through the Hub, not only directly on the development host.
 3. Bind users A and B separately. Upload different snapshots; verify each user sees

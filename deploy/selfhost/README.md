@@ -17,9 +17,9 @@ image with synthetic users, and publishes a multi-architecture image to
 | Tag | Meaning |
 | --- | --- |
 | `edge` | Default-branch build; use a digest when deploying it |
-| `0.1.0-alpha.N` | An exact release |
+| `x.y.z`, `x.y.z-alpha.N` | An exact release |
 | `beta` | Most recent release, including prereleases; created by the next release tag |
-| `latest` | Stable releases only; absent until the first stable release |
+| `latest` | Most recent stable release (no `-alpha.N` suffix) |
 
 Publishing an image does not restart a running server. Like the Canvas deployment,
 update deliberately with `docker compose pull` followed by `docker compose up -d`.

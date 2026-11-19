@@ -73,6 +73,5 @@ Personal profile: require isolated per-user binding, actual
 snapshot synchronization, revoke/rebind validation and a second user's acceptance
 test. Do not expose an operator's personal Workday snapshot as a public service.
 
-The current alpha does not include continuous seat monitoring,
-self-service binding provisioning, automatic registration, complete degree
-auditing or a production SLA. These are explicit outstanding milestones.
+This release does not include continuous seat monitoring, automatic
+registration, complete degree auditing or a production SLA. These are explicit outstanding milestones.
