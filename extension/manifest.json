@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "UBC Course Capture",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Preview and sync your UBC Workday course snapshots to your private connection.",
   "icons": {
     "16": "icons/icon-16.png",
