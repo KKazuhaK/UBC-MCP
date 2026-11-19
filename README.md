@@ -112,14 +112,17 @@ node dist/connector/cli.js revoke BINDING_ID
 Revocation disables both tokens and removes active snapshots. Revoked data may
 remain in historical backups; manage backup retention separately.
 
-## Firefox status
+## Browser stores
 
-Extension 0.2.3 prepares Firefox support and fixes startup stuck at Checking.
-For a Firefox submission build, run npm run build:firefox. See
-[signing preparation](docs/firefox-publishing.md) and
-[privacy](docs/extension-privacy.md) ([中文](docs/extension-privacy.zh.md)). The ZIP is unsigned; Mozilla signing is
-still required for persistent installation. Firefox connection/upload requires
-connector alpha.4, which has not yet been deployed from this workstation.
+The extension (0.4.x) is built for Chrome, Edge and Firefox 142+. Each release
+attaches the Chrome zip, the unsigned Firefox zip and the source archive (see
+[extension release](docs/chrome-release.md)); a stable release also submits
+them to the Chrome Web Store, Microsoft Edge Add-ons and Firefox Add-ons once
+each store's listing exists and its credentials are configured. What to enter
+when a listing is first created is in [store listings](docs/store-listing.md).
+Until the listings exist, load the unpacked build; Firefox installs only a copy
+signed by Mozilla. Privacy: [policy](docs/extension-privacy.md)
+([中文](docs/extension-privacy.zh.md)).
 
 ## Capture Workday course data
 

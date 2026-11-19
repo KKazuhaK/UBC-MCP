@@ -31,10 +31,16 @@ store is created by hand; the workflow header lists the variables and secrets.
 A store refuses a version it already has.
 
 - Chrome Web Store: upload and publish through API v2.
+- Microsoft Edge Add-ons: the Chrome zip, uploaded and published through Edge
+  Add-ons API v1.1.
 - Firefox Add-ons: `web-ext sign` with the source archive. The channel comes
-  from the `FIREFOX_CHANNEL` variable, `unlisted` by default; an unlisted signed
+  from the `FIREFOX_CHANNEL` variable, `unlisted` by default (set it to
+  `listed` for the public listing, which Firefox updates automatically); an unlisted signed
   XPI is attached to the release as `ubc-course-capture-firefox-<version>.xpi`,
   with `ubc-course-capture-firefox-<version>.xpi.sha256`.
+
+What to enter when each listing is first created by hand (text, permission
+justifications, data disclosures, reviewer notes): [store-listing.md](store-listing.md).
 
 Store listing privacy policy:
 https://github.com/KKazuhaK/UBC-MCP/blob/main/docs/extension-privacy.md
