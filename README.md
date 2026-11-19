@@ -109,8 +109,15 @@ user's Downloads folder are ordinary plaintext files and need private handling.
 node dist/connector/cli.js revoke BINDING_ID
 ```
 
-Revocation disables both tokens and removes active snapshots. Revoked data may
-remain in historical backups; manage backup retention separately.
+Revocation disables both tokens and removes active snapshots. The revoked
+binding row (token hashes, no label) is kept for the delete period below so the
+tokens stay rejected, then removed. Revoked data may remain in historical
+backups; manage backup retention separately.
+
+Snapshots older than `UBC_SNAPSHOT_STALE_DAYS` (default 14, by capture time) are
+not served; the tools tell the user to sync again. `serve` deletes snapshots and
+revoked bindings older than `UBC_SNAPSHOT_DELETE_DAYS` (default 30) at startup
+and every 6 hours. The stale value must not exceed the delete value.
 
 ## Browser stores
 

@@ -25,7 +25,7 @@ export class Tools {
   private async period(campus:Campus,id:string,kind:'sections'|'registrations'='sections') {
     const all=await this.personal.snapshots();
     const s=all.find(s=>s.campus===campus&&s.academicPeriod.id===id&&s.kind===kind);
-    if (!s) throw new SourceError('PERIOD_NOT_CAPTURED','No snapshot for this exact campus and period; inspect get_data_status.');
+    if (!s) throw new SourceError('PERIOD_NOT_CAPTURED','No current snapshot for this exact campus and period. It may be missing or older than the retention window (14 days by default); sync again from Workday with the extension, then inspect get_data_status.');
     return s;
   }
   definitions() {
