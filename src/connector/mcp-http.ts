@@ -227,6 +227,9 @@ export type McpResource={
   close():Promise<void>;
 };
 
+/** The token of an `Authorization: Bearer` header (scheme case-insensitive, extra whitespace allowed), or null if it is not one. */
+export const bearerToken=(header:string):string|null=>/^Bearer\s/i.test(header)?header.replace(/^Bearer\s+/i,'').trim():null;
+
 function sendJson(res:ServerResponse,status:number,value:unknown,headers:Record<string,string>={}) {
   res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(value));
 }
@@ -279,11 +282,11 @@ export function mcpResource(store:Store,config:McpResourceConfig,options:{verifi
     if(req.headers.origin)return sendJson(res,403,{error:'BROWSER_REQUEST_REFUSED'});
     if(!['POST','GET','DELETE'].includes(req.method??''))return sendJson(res,405,{error:'METHOD_NOT_ALLOWED'},{Allow:'POST, GET, DELETE'});
     const ip=clientAddress(req);
-    const header=req.headers.authorization??'',presented=/^Bearer\s/i.test(header);
+    const header=req.headers.authorization??'',presented=bearerToken(header)!==null;
     // Discovery probes (no token) and expired tokens are normal client behaviour: they only count against a generous allowance.
     if(!presented){if(!hit(routine,ip,600))return sendJson(res,429,{error:'RATE_LIMITED'});return sendJson(res,401,{error:'unauthorized'},{'WWW-Authenticate':challenge(false)});}
     let auth:VerifiedToken;
-    try{auth=await verify(header.replace(/^Bearer\s+/i,'').trim());}
+    try{auth=await verify(bearerToken(header)!);}
     catch(e) {
       if(e instanceof IssuerUnavailable){logLimited('unavailable:'+e.reason,`MCP token verification unavailable: ${e.reason}`);return sendJson(res,503,{error:'temporarily_unavailable'},{'Retry-After':'10'});}
       const expired=e instanceof TokenInvalid&&e.reason==='exp';
