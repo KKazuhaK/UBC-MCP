@@ -119,6 +119,31 @@ not served; the tools tell the user to sync again. `serve` deletes snapshots and
 revoked bindings older than `UBC_SNAPSHOT_DELETE_DAYS` (default 30) at startup
 and every 6 hours. The stale value must not exceed the delete value.
 
+### Readiness endpoint
+
+`GET /v1/readiness` tells a platform (for example MCPHub) whether a user's connection actually works, not just that a
+token is bound. Authenticate with the binding's READ token as `Authorization: Bearer ...`; the UPLOAD token, a missing,
+unknown or revoked token all return `401 {"error":"UNAUTHORIZED"}`. It is read-only, takes no browser origin, and
+returns only a state and a coarse age, never tokens, snapshots or course data (service readiness contract, version 1).
+
+```json
+{"version":1,"state":"degraded","summary":"Course data last updated 9 days ago — open the companion to refresh.","checked_at":"2026-11-19T10:00:00.000Z"}
+```
+
+| State | When | `action` |
+| --- | --- | --- |
+| `needs_setup` | No snapshot is stored for the binding | Install the UBC browser companion (`UBC_COMPANION_INSTALL_URL`) |
+| `degraded` | The newest snapshot is older than `UBC_READINESS_STALE_DAYS` | none |
+| `ready` | Otherwise | none |
+
+`expires_at` is never sent because the connector's tokens do not expire; a revoked binding is a `401`. Snapshots are
+deleted after `UBC_SNAPSHOT_DELETE_DAYS`, after which a binding reads as `needs_setup` again.
+
+| Variable | Meaning |
+| --- | --- |
+| `UBC_READINESS_STALE_DAYS` | Age in days after which the state is `degraded`. Default 7; must not exceed `UBC_SNAPSHOT_STALE_DAYS` (14), the age at which snapshots stop being served. |
+| `UBC_COMPANION_INSTALL_URL` | https URL of the `needs_setup` action. Default: the [Browser stores](#browser-stores) section of this README. |
+
 ## Browser stores
 
 The extension (0.4.x) is built for Chrome, Edge and Firefox 142+. Each release

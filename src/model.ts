@@ -66,9 +66,9 @@ export function parseSnapshot(value: unknown, now = Date.now()): Snapshot {
   return snapshot;
 }
 
-export function freshness(observedAt: string, now = Date.now()) {
+export function freshness(observedAt: string, now = Date.now(), staleAfterSeconds = 300) {
   const ageSeconds = Math.max(0, Math.floor((now - Date.parse(observedAt)) / 1000));
-  return {observedAt, ageSeconds, stale: ageSeconds > 300, kind: 'snapshot' as const};
+  return {observedAt, ageSeconds, stale: ageSeconds > staleAfterSeconds, kind: 'snapshot' as const};
 }
 
 export function registrationState(raw: string | null): 'open'|'waitlist'|'closed'|'unknown' {

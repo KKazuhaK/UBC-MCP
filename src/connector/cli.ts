@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {parseSnapshot} from '../model.js';
 import {Store,retentionFromEnv} from './store.js';
 import {connectorServer} from './http.js';
+import {readinessFromEnv} from './readiness.js';
 import {adapterFromEnv} from './adapters/index.js';
 import {mcpConfigFromEnv,mcpResource,checkedUrl} from './mcp-http.js';
 const command=process.argv[2],directory=process.env.UBC_DATA_DIR??'.data/connector';
@@ -27,7 +28,8 @@ try {
     }
     console.log(`${completed} snapshot(s) synchronized. Capture times were preserved.`);
   }else {
-    const store=new Store(directory,command==='serve'?retentionFromEnv():undefined);
+    const retention=command==='serve'?retentionFromEnv():undefined;
+    const store=new Store(directory,retention);
     if(command==='create-binding'){console.log(JSON.stringify(store.create(process.argv[3]??''),null,2));store.close();}
     else if(command==='link-account'){
       const arg=(name:string)=>{const i=process.argv.indexOf(name);return i>0?process.argv[i+1]:undefined;};
@@ -46,7 +48,7 @@ try {
       const mcpConfig=mcpConfigFromEnv(),mcp=mcpConfig?mcpResource(store,mcpConfig):null;
       const cleanup=()=>{try{const r=store.purge();if(r.snapshots||r.bindings)console.error(`Retention cleanup removed ${r.snapshots} snapshot(s) and ${r.bindings} revoked binding(s)`);}catch{console.error('Retention cleanup failed');}};
       cleanup();const cleanupTimer=setInterval(cleanup,6*3_600_000);cleanupTimer.unref();
-      const server=connectorServer(store,adapterFromEnv(store),mcp);server.listen(port,host,()=>console.error(`UBC connector listening on ${host}:${port}${mcp?` (remote MCP resource ${mcp.config.resource})`:''}`));
+      const server=connectorServer(store,adapterFromEnv(store),mcp,readinessFromEnv(process.env,retention));server.listen(port,host,()=>console.error(`UBC connector listening on ${host}:${port}${mcp?` (remote MCP resource ${mcp.config.resource})`:''}`));
       for(const sig of ['SIGINT','SIGTERM']as const)process.on(sig,()=>{clearInterval(cleanupTimer);server.close(()=>{void (mcp?.close()??Promise.resolve()).finally(()=>{store.close();process.exit(0);});});});
     }else{store.close();throw new Error('Use serve, create-binding <label>, link-account --sub <sub> [--issuer <url>], revoke <id>, or push <file>');}
   }

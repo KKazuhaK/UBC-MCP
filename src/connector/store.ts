@@ -119,6 +119,15 @@ export class Store {
       return parseSnapshot(JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString('utf8')));
     });
   }
+  /** Count and newest capture time of a binding's stored snapshots, regardless of the stale window. Reads no snapshot bodies. */
+  summary(id:string):{count:number;newestCapturedAt:string|null} {
+    this.active(id);
+    let newest:string|null=null,newestMs=-Infinity,count=0;
+    for(const row of this.db.prepare('SELECT captured_at FROM snapshots WHERE binding_id=?').all(id)){
+      count++;const ms=Date.parse(String(row.captured_at));if(ms>newestMs){newestMs=ms;newest=String(row.captured_at);}
+    }
+    return {count,newestCapturedAt:newest};
+  }
   /** Deletes snapshots older than deleteDays and bindings revoked more than deleteDays ago. */
   purge():{snapshots:number;bindings:number} {
     const cutoff=this.now()-this.retention.deleteDays*DAY;

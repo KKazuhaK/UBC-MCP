@@ -5,10 +5,12 @@ import {Store} from './store.js';
 import type {PlatformAdapter} from './adapters/index.js';
 import type {McpResource} from './mcp-http.js';
 import {VERSION} from '../version.js';
+import {DEFAULT_READINESS,readiness} from './readiness.js';
+import type {ReadinessConfig} from './readiness.js';
 function json(res:ServerResponse,status:number,value:unknown) {
   res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));
 }
-export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:McpResource|null) {
+export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:McpResource|null,readinessConfig:ReadinessConfig=DEFAULT_READINESS) {
   // Snapshot reads require bearer tokens; an optional platform adapter owns its own routes and session validation.
   const recent=new Map<string,{count:number;until:number}>();
   const server=createServer(async(req:IncomingMessage,res:ServerResponse)=>{
@@ -24,7 +26,8 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
       if(state.count>120)return json(res,429,{error:'RATE_LIMITED'});
       try{await adapter.handle(req,res,(status,value)=>json(res,status,value));}catch{if(!res.headersSent)json(res,503,{error:'SERVICE_UNAVAILABLE'});else res.end();}return;
     }
-    if (req.url!=='/v1/snapshots'||!['GET','POST'].includes(req.method??'')) return json(res,404,{error:'NOT_FOUND'});
+    const readinessRoute=req.url==='/v1/readiness';
+    if (!(req.url==='/v1/snapshots'&&['GET','POST'].includes(req.method??''))&&!(readinessRoute&&req.method==='GET')) return json(res,404,{error:'NOT_FOUND'});
     if(req.headers.origin) {
       if(req.method!=='POST'||req.headers.cookie||!isExtensionOrigin(req.headers.origin))return json(res,403,{error:'BROWSER_REQUEST_REFUSED'});
       res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');
@@ -37,6 +40,7 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
     const token=/^Bearer ([\w-]+)$/.exec(req.headers.authorization??'')?.[1]??'';
     const id=store.authenticate(token,mode);if(!id)return json(res,401,{error:'UNAUTHORIZED'});
     try {
+      if(readinessRoute)return json(res,200,readiness(store.summary(id),Date.now(),readinessConfig));
       if(mode==='read')return json(res,200,store.get(id));
       if(!req.headers['content-type']?.startsWith('application/json'))return json(res,415,{error:'JSON_REQUIRED'});
       const chunks:Buffer[]=[];let size=0;
