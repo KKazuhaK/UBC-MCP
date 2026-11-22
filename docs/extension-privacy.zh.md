@@ -132,7 +132,7 @@ connector 删除你当前的快照和账号关联；只保留一条已撤销的�
 | --- | --- |
 | 访问你连接的 MCPHub（可选，`https://*/*`，实际只申请那一个地址），并在其 `/ubc/` 页面运行一个脚本 | 上传到这个 MCPHub；该脚本让它的 UBC 页面把一次性配对码交给扩展、请求立即同步，不读取其他内容。扩展里没有内置任何 MCPHub |
 | 访问其他 MCPHub（可选，`https://*/*`，实际只申请你填写的地址） | 连接和上传；连接时申请 |
-| 访问 `https://wd10.myworkday.com/*` | 自动同步时读取 Workday 页面 |
+| 访问 `https://wd10.myworkday.com/*`（可选） | 自动同步时读取 Workday 页面；连接时申请 |
 | `activeTab`、`scripting` | 读取你预览的 Workday 标签页；在 Workday 标签页运行同步脚本，在 MCPHub 标签页运行授权脚本 |
 | `alarms` | 每 15 分钟同步已打开的 Workday 页面，并在数据过旧时提醒 |
 | `storage` | 保存上文列出的连接和设置 |
