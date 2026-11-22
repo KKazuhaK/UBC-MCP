@@ -153,10 +153,12 @@ connector's tokens do not expire; a revoked binding is a `401`. The endpoint has
 
 The extension (0.4.x) is built for Chrome, Edge and Firefox 142+. Each release
 attaches the Chrome zip, the unsigned Firefox zip and the source archive (see
-[extension release](docs/chrome-release.md)); a stable release also submits
-them to the Chrome Web Store, Microsoft Edge Add-ons and Firefox Add-ons once
-each store's listing exists and its credentials are configured. What to enter
-when a listing is first created is in [store listings](docs/store-listing.md).
+[extension release](docs/chrome-release.md)). Bumping the version in
+`extension/manifest.json` on `main` creates an `extension-v<version>` release and
+submits it to the Chrome Web Store, Microsoft Edge Add-ons and Firefox Add-ons
+once each store's listing exists and its credentials are configured
+([store publishing](docs/store-publishing.md)). What to enter when a listing is
+first created is in [store listings](docs/store-listing.md).
 Until the listings exist, load the unpacked build; Firefox installs only a copy
 signed by Mozilla. Privacy: [policy](docs/extension-privacy.md)
 ([中文](docs/extension-privacy.zh.md)).
