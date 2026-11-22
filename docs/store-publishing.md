@@ -67,9 +67,9 @@ Google Cloud project for the API.
    Dashboard](https://chrome.google.com/webstore/devconsole), choose **New
    item**, upload the Chrome zip and fill in the listing and privacy tabs from
    [store-listing.md](store-listing.md). Submit it for review.
-2. **IDs (variables).** The extension id is the 32-letter id of the item in
-   the dashboard (also in the item's URL). The publisher id is shown in the
-   dashboard's **Account** page.
+2. **IDs (variables).** The extension id is the 32-letter id on the item's
+   **Package** tab (also in the item's URL). The publisher id is under
+   **Publisher > Settings** in the dashboard.
 3. **API access.** In the [Google Cloud console](https://console.cloud.google.com/):
    1. Create or pick a project and enable the **Chrome Web Store API**.
    2. Under **Google Auth Platform** (formerly OAuth consent screen), configure
