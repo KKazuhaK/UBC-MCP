@@ -59,9 +59,8 @@ described below.
 
 ## When it reads
 
-- **Connect with MCPHub turns on automatic sync**, as soon as you click it,
-  even if you do not finish connecting. You can pause it with Pause automatic
-  sync at any time.
+- **Connecting turns on automatic sync** and starts the first sync right away.
+  You can pause it with Pause automatic sync at any time.
 - **Background registration sync.** About one minute after sync is turned on
   and then every 15 minutes while the browser is running, the extension makes
   your browser open View My Courses in a background tab, with your existing
@@ -176,8 +175,9 @@ there. Uninstalling the extension removes its local storage.
 
 | Permission | Why |
 | --- | --- |
-| Site access to your MCPHub (optional, `https://*/*` narrowed to the origin you enter) | connect and upload; requested when you connect |
-| Site access to `https://wd10.myworkday.com/*` (optional) | read Workday pages for automatic sync; requested when you connect or turn sync on |
+| Site access to `https://mcp.kazuhahub.com/*` and a script on its `/ubc/` page | upload to the default MCPHub; the script lets that page's "Connect this browser" button hand over a one-time pairing code and reads nothing else |
+| Site access to another MCPHub (optional, `https://*/*` narrowed to the origin you enter) | connect and upload; requested when you connect |
+| Site access to `https://wd10.myworkday.com/*` | read Workday pages for automatic sync |
 | `activeTab`, `scripting` | read the Workday tab you preview; run the sync script in Workday tabs and the approval script in the MCPHub tab |
 | `alarms` | run the 15-minute registration sync |
 | `storage` | keep the connection and settings listed above |

@@ -3,6 +3,7 @@ import {hubOrigin,storedConnection} from './connection.js';
 import {extractWorkdayDom} from './dom.js';
 import {normalizeCapture} from './normalize.js';
 import {extractRegistrationDom,normalizeRegistrations} from './registrations.js';
+import {DEFAULT_HUB,HUB_PAGE_PATH} from './defaults.js';
 declare const browser:typeof chrome;
 const extensionApi=typeof browser!=='undefined'?browser:chrome;
 const el=(id:string)=>document.getElementById(id)!;
@@ -34,7 +35,7 @@ async function action(id:string,label:string,work:()=>Promise<void>) {
 async function showConnection() {
   const x=await extensionApi.storage.local.get(['ubcConnection','ubcHubOrigin','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;
   autoSync=!!x.ubcAutoSync;
-  el('connection').textContent=connection?`Connected · ${connection.origin}`:'Not connected · Sign in through your MCPHub.';
+  el('connection').textContent=connection?`Connected · ${connection.origin}`:'Not connected yet.';
   el('connect-setup').hidden=paired;el('connected-actions').hidden=!paired;
   el('auto-status').textContent=!paired?'Connect to MCPHub to sync.':x.ubcSyncError?`Sync issue: ${x.ubcSyncError}`:x.ubcAutoSync?`Automatic sync is on.${x.ubcLastSync?.at?' Last sync: '+new Date(x.ubcLastSync.at).toLocaleString()+'.':''}`:'Enable automatic sync with the button below.';
   el('auto-toggle').textContent=x.ubcAutoSync?'Pause automatic sync':'Enable automatic sync';
@@ -45,13 +46,17 @@ busy=true;controls();
 async function initialize(){
   let timer:ReturnType<typeof setTimeout>|undefined;
   try {
+    let data:Record<string,any>={};
     const setup=async()=>{
-      // Firefox has no setAccessLevel. This extension declares no content scripts.
+      // Firefox has no setAccessLevel. The only content script is the Hub page bridge, which never reads storage.
       if(typeof extensionApi.storage.local.setAccessLevel==='function')await extensionApi.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
-      const data=await showConnection();(el('hub-origin') as HTMLInputElement).value=data.ubcHubOrigin??'';
+      data=await showConnection();(el('hub-origin') as HTMLInputElement).value=data.ubcHubOrigin??'';
     };
     await Promise.race([setup(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Could not read the local connection. Reopen the extension or reload it, then try again.')),8000);})]);
-    feedback(paired?'Connected. Workday sync is ready.':'Ready. Enter your MCPHub address to connect.');
+    // A request the popup could not finish (it closes while the browser asks for access) reports here.
+    const a=data.ubcAuthorization;
+    if(!paired&&a?.status==='error'&&a.message)feedback(a.message,'error');
+    else feedback(paired?'Connected. Workday sync is ready.':'Ready. Open MCPHub and click “Connect this browser”.');
   }catch(e){el('connection').textContent='Local connection could not be checked.';feedback(errorMessage(e),'error');}
   finally{if(timer)clearTimeout(timer);busy=false;controls();}
 }
@@ -100,7 +105,7 @@ el('upload').onclick=()=>action('upload','Preparing upload…',async()=>{
     if(!r.ok){await r.body?.cancel();if(r.status===401){await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection']);await showConnection();throw new Error('Your connection was revoked. Connect again with MCPHub.');}throw new Error(`Upload stopped after ${completed} of ${total} periods (HTTP ${r.status}). Refresh Workday and preview again.`);}
     await r.body?.cancel();pending.shift();completed++;
   }
-  feedback(`Synced ${completed} period(s). You can close Chrome. Sync again when your Workday data changes.`,'success');
+  feedback(`Synced ${completed} period(s).${autoSync?' Automatic sync keeps them up to date while Workday is open.':''}`,'success');
 });
 for(const [id,kind]of [['capture','sections'],['registrations','registrations']]as const)
   el(id).onclick=()=>action(id,'Preparing your export…',async()=>{
@@ -111,13 +116,37 @@ for(const [id,kind]of [['capture','sections'],['registrations','registrations']]
     feedback('Export saved. Keep registration files private. You can import this file later to preview and sync it.','success');
   });
 
+el('open-hub').onclick=()=>action('open-hub','Opening MCPHub…',async()=>{
+  if(!DEFAULT_HUB){(el('manual-connect') as HTMLDetailsElement).open=true;throw new Error('Enter your MCPHub address below.');}
+  await extensionApi.tabs.create({url:DEFAULT_HUB+HUB_PAGE_PATH});
+  feedback('Click “Connect this browser” on the MCPHub page. This popup can be closed.');
+});
+/**
+ * Asks for access to another Hub and then finishes the request. The request is saved first:
+ * Chrome closes this popup while its access prompt is open, and the background then finishes it.
+ */
+async function withHubAccess(intent:{type:'authorize'|'pair';origin:string;code?:string}){
+  void extensionApi.storage.local.set({ubcPendingIntent:{...intent,at:Date.now()},ubcAuthorization:null});
+  // The permission request must stay the first await of the click.
+  if(!await extensionApi.permissions.request({origins:[intent.origin+'/*']})){
+    await extensionApi.storage.local.remove('ubcPendingIntent');
+    throw new Error('Allow access to your MCPHub to continue.');
+  }
+  const response=await extensionApi.runtime.sendMessage({type:'ubc.intent.resume'});
+  if(!response?.ok)throw new Error(response?.error??'Could not connect to your MCPHub.');
+}
 el('hub-login').onclick=()=>action('hub-login','Opening your MCPHub…',async()=>{
   const selected=hubOrigin((el('hub-origin') as HTMLInputElement).value);
-  if(!await extensionApi.permissions.request({origins:[selected+'/*','https://wd10.myworkday.com/*']}))throw new Error('Allow access to your selected MCPHub and UBC Workday to continue.');
-  await extensionApi.storage.local.set({ubcAutoSync:true});
-  const response=await extensionApi.runtime.sendMessage({type:'ubc.authorize.start',origin:selected});
-  if(!response?.ok)throw new Error(response?.error??'Could not open your MCPHub.');
+  await withHubAccess({type:'authorize',origin:selected});
   feedback('Continue in the MCPHub tab. This popup can be closed.');
+});
+el('pair').onclick=()=>action('pair','Connecting…',async()=>{
+  const selected=hubOrigin((el('hub-origin') as HTMLInputElement).value||DEFAULT_HUB||'');
+  const code=(el('pair-code') as HTMLInputElement).value.trim();
+  if(!/^[\w-]{43}$/.test(code))throw new Error('Enter the pairing code shown on the MCPHub UBC page.');
+  await withHubAccess({type:'pair',origin:selected,code});
+  (el('pair-code') as HTMLInputElement).value='';
+  await showConnection();feedback('Connected. Your first Workday sync has started.','success');
 });
 el('sync-all').onclick=()=>action('sync-all','Syncing open Workday pages…',async()=>{
   if(!paired)throw new Error('Connect to MCPHub first.');
