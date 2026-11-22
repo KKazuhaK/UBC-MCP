@@ -1,5 +1,6 @@
-// Declared only for the default Hub's UBC page. It lets that page see that the extension is
-// installed and hand it a one-time pairing code after the person clicks "Connect this browser".
+// Registered at runtime only for the UBC page of the MCPHub the person chose (see registerBridge in
+// background.ts). It lets that page see that the extension is installed and hand it a one-time
+// pairing code.
 // It reads nothing else on the page and never sees cookies or Hub tokens.
 import {BRIDGE_CHANNEL} from './defaults.js';
 declare const browser:typeof chrome;
@@ -12,9 +13,9 @@ declare const browser:typeof chrome;
   const version=api.runtime.getManifest().version;
   let claiming=false,syncing=false;
   const announce=async()=>{
-    let status:{connected?:boolean;lastSyncAt?:string|null;syncError?:string|null}|undefined;
+    let status:{connected?:boolean;pending?:boolean;lastSyncAt?:string|null;syncError?:string|null}|undefined;
     try{status=await api.runtime.sendMessage({type:'ubc.bridge.status'});}catch{/* The service worker restarts on the next message. */}
-    post({type:'ready',version,connected:!!status?.connected,lastSyncAt:status?.lastSyncAt??null,syncError:status?.syncError??null});
+    post({type:'ready',version,connected:!!status?.connected,pending:!!status?.pending,lastSyncAt:status?.lastSyncAt??null,syncError:status?.syncError??null});
   };
   window.addEventListener('message',event=>{
     if(event.source!==window||event.origin!==location.origin)return;

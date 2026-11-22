@@ -3,7 +3,7 @@
 ## Release builds
 
 Build the package with `npm run build:extension` (Chrome) and `npm run build:firefox`.
-The default MCPHub (`https://mcp.kazuhahub.com`) is named only in `extension/manifest.json` (its host permission and the `/ubc/` page bridge); the build scripts read it from there (`scripts/default-hub.mjs`). Users of another MCPHub enter its address in the popup.
+No MCPHub address is built in: users connect from their own MCPHub's UBC page (clicking the extension's icon there) or enter its address in the popup.
 
 ## Release assets
 

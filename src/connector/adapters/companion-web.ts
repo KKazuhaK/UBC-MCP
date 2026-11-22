@@ -15,7 +15,7 @@ export const companionStyle='.button-link{display:inline-flex;align-items:center
  * {pair():Promise<{code}>, startAccount():Promise<'redirect'|void>, refresh?():Promise<void>}.
  */
 export const companionScript=String.raw`
-const companion={state:'detecting',connected:false,lastSyncAt:null,syncError:null},CHANNEL='ubc-companion';let companionWaiting=null,companionSyncWaiting=null,autoSynced=false;
+const companion={state:'detecting',connected:false,pending:false,lastSyncAt:null,syncError:null},CHANNEL='ubc-companion';let companionWaiting=null,companionSyncWaiting=null,autoSynced=false;
 /** Opening the page syncs by itself when the data is older than this. */
 const AUTO_SYNC_MS=60*60_000;
 const hasWindow=typeof window!=='undefined'&&typeof window.addEventListener==='function'&&typeof window.postMessage==='function';
@@ -27,7 +27,7 @@ function companionRender(){
   sync.hidden=!linked;syncLine.hidden=!linked;
   if(linked)syncLine.textContent=(companion.lastSyncAt?'上次同步：'+companionAgo(companion.lastSyncAt):'尚未同步')+(companion.syncError?'。上次的问题：'+companion.syncError:'');
   if(companion.state==='detecting')line.textContent='正在检测 UBC Course Capture 扩展…';
-  else if(companion.state==='absent')line.textContent='未检测到扩展。安装后这个页面会自动打开，回来点一下「连接此浏览器」即可。';
+  else if(companion.state==='absent')line.textContent='还没连上扩展。装好 UBC Course Capture 后，在这个页面点浏览器工具栏里的扩展图标，按提示允许访问，页面就会自动完成连接。';
   else if(companion.connected){line.textContent='此浏览器已连接，扩展会自动同步 Workday 数据。';if(!busy)button.textContent='重新连接此浏览器';button.classList.add('secondary');}
   else{line.textContent=connected?'已检测到扩展。点击下方按钮，此浏览器会自动完成配置并开始同步。':'已检测到扩展。点击下方按钮，先授权 MCPHub 账号，回来后自动完成配置。';if(!busy)button.textContent='连接此浏览器';button.classList.remove('secondary');}
 }
@@ -62,6 +62,13 @@ async function companionConnect(){
 }
 function companionStart(){return run('companion-connect',companionConnect).then(companionRender);}
 let continueTries=0;
+// The person chose this Hub from the extension's popup: finish connecting without another click.
+let autoConnected=false;
+function companionAutoConnect(){
+  if(autoConnected||!companion.pending||companion.connected||companion.state!=='present')return;
+  if(busy){setTimeout(companionAutoConnect,300);return;}
+  autoConnected=true;void companionStart();
+}
 function companionContinue(){
   if(!companionFlag()||companion.state!=='present'||!connected)return;
   if(busy){if(continueTries++<20)setTimeout(companionContinue,300);return;}
@@ -79,7 +86,7 @@ if(hasWindow){
   window.addEventListener('message',event=>{
     if(event.source!==window||event.origin!==location.origin)return;
     const data=event.data;if(!data||data.channel!==CHANNEL||data.from!=='extension')return;
-    if(data.type==='ready'){companion.state='present';companion.connected=!!data.connected;companion.lastSyncAt=typeof data.lastSyncAt==='string'?data.lastSyncAt:null;companion.syncError=typeof data.syncError==='string'?data.syncError:null;companionRender();companionContinue();companionAutoSync();}
+    if(data.type==='ready'){companion.state='present';companion.connected=!!data.connected;companion.pending=!!data.pending;companion.lastSyncAt=typeof data.lastSyncAt==='string'?data.lastSyncAt:null;companion.syncError=typeof data.syncError==='string'?data.syncError:null;companionRender();companionContinue();companionAutoConnect();companionAutoSync();}
     else if(data.type==='result'&&companionWaiting)companionWaiting(data);
     else if(data.type==='synced'&&companionSyncWaiting)companionSyncWaiting(data);
   });
