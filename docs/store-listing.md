@@ -94,7 +94,7 @@ Other.
 | `downloads` | Export saves the captured data as a JSON file to a place the user chooses (a Save As dialog opens). |
 | `storage` | Keeps the MCPHub address, the upload credential, whether automatic sync is on and the last sync status on this device. |
 | `alarms` | Every 15 minutes while automatic sync is on: syncs the Workday pages already open and, when the data is older than the user's chosen age, opens the extension's reminder page. |
-| Host permissions (`https://wd10.myworkday.com/*`, `https://mcp.kazuhahub.com/*`) | UBC Workday, to read the course and registration pages the extension syncs; and the default MCPHub, to upload them. |
+| Host permissions (`https://wd10.myworkday.com/*`, `https://mcp.kazuhahub.com/*`) | UBC Workday, to read the course and registration pages the user opens so they can be synced; and the MCPHub the extension offers by default, for its one-click pairing page. Synced data goes only to the MCPHub the user connected. |
 | Content script (`https://mcp.kazuhahub.com/ubc/*`) | A small bridge on the default MCPHub's UBC page lets its "Connect this browser" button hand the extension a one-time pairing code. It reads nothing else on the page. |
 | Host permissions (optional, `https://*/*`) | Requested at runtime only for another MCPHub address the user enters. Each self-hosted MCPHub has its own address, so it cannot be listed in advance. |
 
