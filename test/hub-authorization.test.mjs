@@ -24,8 +24,9 @@ test('new extension installation has no prefilled or required Hub host',()=>{
  assert.equal(manifest.host_permissions,undefined);assert.deepEqual(manifest.optional_host_permissions,['https://*/*']);
 });
 test('Hub addresses are explicit HTTPS origins and a saved token stays bound to its origin',()=>{
- for(const value of ['', 'http://hub.example.com','https://a:b@hub.example.com','https://hub.example.com/path','https://hub.example.com?token=secret','https://hub.example.com#secret'])assert.throws(()=>hubOrigin(value));
+ for(const value of ['', 'http://hub.example.com','https://a:b@hub.example.com','https://hub.example.com?token=secret','https://hub.example.com#secret','https://hub.example.com/mcp/ubc-personal?token=secret','https://hub.example.com/mcp/ubc-personal#secret'])assert.throws(()=>hubOrigin(value));
  assert.equal(hubOrigin(' https://my-hub.example.com/ '),'https://my-hub.example.com');
+ assert.equal(hubOrigin('https://my-hub.example.com/mcp/ubc-personal'),'https://my-hub.example.com');
  const data={ubcConnection:{origin:'https://original.example.com',uploadToken:'a'.repeat(43)},ubcHubOrigin:'https://other.example.com'};
  assert.equal(storedConnection(data).origin,'https://original.example.com');
  assert.equal(storedConnection({ubcUploadToken:'b'.repeat(43)}),null);

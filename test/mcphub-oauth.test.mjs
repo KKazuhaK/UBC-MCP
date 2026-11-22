@@ -318,6 +318,7 @@ test('the page and routes: CSP, no adapter-wide leakage, extension preflight, un
   const {origin,req}=await setup(t);
   const page=await req('/ubc/');assert.equal(page.status,200);assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);
   const html=await page.text();assert.match(html,/Connect with MCPHub/);assert.match(html,/忘记此浏览器/);assert.ok(!html.includes('{{'));
+  assert.ok(html.includes(`<code id="hub-address" class="endpoint">${origin}</code>`));assert.match(html,/id="copy-hub"/);assert.match(await (await req('/ubc/app.js')).text(),/\$\('copy-hub'\)\.onclick/);
   assert.equal((await req('/ubc/app.js')).status,200);
   assert.deepEqual(await (await req('/ubc/capabilities')).json(),{extensionAuthorization:1});
   assert.equal((await req('/ubc/api/connect',{method:'POST',headers:{Origin:origin}})).status,404);   // cookie-adapter routes do not exist
