@@ -5,10 +5,28 @@ import {build} from 'esbuild';
 import {runInNewContext} from 'node:vm';
 import {parseHTML} from 'linkedom';
 import {snapshot,section} from './fixtures.mjs';
-test('popup has no manual pairing controls',()=>{
+test('popup leads with the Hub page; another Hub and a pairing code are the fallback',()=>{
  const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));
- for(const id of ['pair','pair-code'])assert.equal(document.getElementById(id),null);assert.ok(document.getElementById('hub-login'));
- assert.doesNotMatch(readFileSync('src/collector/popup.ts','utf8'),/pair-code|ubcLegacyToken|api\/claim/);
+ const primary=document.querySelector('#connect-setup > .actions button');assert.equal(primary.id,'open-hub');
+ const manual=document.getElementById('manual-connect');assert.equal(manual.tagName,'DETAILS');
+ for(const id of ['hub-origin','hub-login','pair','pair-code'])assert.ok(manual.querySelector('#'+id),id);
+ // The popup never spends codes itself, so the upload credential only ever comes from the background.
+ assert.doesNotMatch(readFileSync('src/collector/popup.ts','utf8'),/ubcLegacyToken|api\/claim/);
+});
+test('a pairing code from the popup survives the popup closing for the access prompt',async()=>{
+ const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));
+ const state={},order=[];
+ const chrome={runtime:{sendMessage:async msg=>{order.push(msg.type);return {ok:true};}},
+  permissions:{request:async x=>{order.push('request:'+x.origins.join());return true;}},
+  storage:{local:{get:async()=>({...state}),set:async x=>{if(x.ubcPendingIntent)order.push('saved:'+x.ubcPendingIntent.type);Object.assign(state,x);},remove:async keys=>{for(const k of Array.isArray(keys)?keys:[keys])delete state[k];}}}};
+ const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false});
+ runInNewContext(bundle.outputFiles[0].text,{document,chrome,AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
+ document.getElementById('hub-origin').value='https://other-hub.example.com/mcp/ubc-personal';
+ document.getElementById('pair-code').value='c'.repeat(43);
+ await document.getElementById('pair').onclick();
+ assert.deepEqual(order,['saved:pair','request:https://other-hub.example.com/*','ubc.intent.resume']);
+ assert.equal(state.ubcPendingIntent.origin,'https://other-hub.example.com');assert.equal(state.ubcPendingIntent.code,'c'.repeat(43));
+ assert.equal(document.getElementById('pair-code').value,'');
 });
 test('a stored connection keeps only the upload credential in trusted local storage and requires explicit preview',async()=>{
  const {document}=parseHTML(readFileSync('extension/popup.html','utf8')),state={ubcConnection:{origin:'https://hub.example.test',uploadToken:'b'.repeat(43)}},requests=[];let access;

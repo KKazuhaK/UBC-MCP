@@ -16,6 +16,10 @@
     "storage",
     "alarms"
   ],
+  "host_permissions": [
+    "https://mcp.kazuhahub.com/*",
+    "https://wd10.myworkday.com/*"
+  ],
   "action": {
     "default_title": "UBC Course Capture",
     "default_icon": {
@@ -29,6 +33,17 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mcp.kazuhahub.com/ubc/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
   "optional_host_permissions": [
     "https://*/*"
   ]

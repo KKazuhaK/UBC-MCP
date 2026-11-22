@@ -1,3 +1,4 @@
+import {hubDefine} from './default-hub.mjs';
 import {build} from 'esbuild';
 import {mkdir,readFile,writeFile,copyFile,cp,rm} from 'node:fs/promises';
 // Start clean so a release zip of this directory holds only this build's files.
@@ -8,16 +9,17 @@ manifest.browser_specific_settings={gecko:{id:process.env.UBC_FIREFOX_ADDON_ID||
 await writeFile(out+'/manifest.json',JSON.stringify(manifest,null,2)+'\n');
 await copyFile('extension/popup.html',out+'/popup.html');
 await cp('src/collector/icons',out+'/icons',{recursive:true,force:true,filter:src=>!src.endsWith('.svg')});
-await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'esm',target:'firefox142',outfile:out+'/popup.js',legalComments:'none'});
+await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'esm',target:'firefox142',outfile:out+'/popup.js',legalComments:'none',define:hubDefine()});
 console.log('Prepared Firefox submission directory: '+out+' (unsigned; signing required for persistent installation)');
 
 await copyFile('LICENSE',out+'/LICENSE.txt');
 await copyFile('node_modules/zod/LICENSE',out+'/THIRD_PARTY_NOTICES.txt');
 
-await build({entryPoints:['src/collector/background.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/background.js',legalComments:'none'});
-await build({entryPoints:['src/collector/hub-link.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/hub-link.js',legalComments:'none'});
+await build({entryPoints:['src/collector/background.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/background.js',legalComments:'none',define:hubDefine()});
+await build({entryPoints:['src/collector/hub-link.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/hub-link.js',legalComments:'none',define:hubDefine()});
+await build({entryPoints:['src/collector/bridge.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/bridge.js',legalComments:'none',define:hubDefine()});
 
-await build({entryPoints:['src/collector/auto-sync.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/auto-sync.js',legalComments:'none'});
+await build({entryPoints:['src/collector/auto-sync.ts'],bundle:true,platform:'browser',format:'iife',target:'firefox142',outfile:out+'/auto-sync.js',legalComments:'none',define:hubDefine()});
 
 await cp(out,'extension-firefox',{recursive:true,force:true});
 console.log('Firefox: load extension-firefox/manifest.json; extension/ is Chrome-only.');
