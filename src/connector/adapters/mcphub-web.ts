@@ -16,7 +16,7 @@ ${companionStep}
 <script src="/ubc/app.js" defer></script></html>`;
 export const script=String.raw`const $=id=>document.getElementById(id);let busy=false,connected=false;
 const extensionState=/^#extension-auth=([a-f0-9]{64})$/.exec(typeof location==='undefined'?'':location.hash)?.[1];
-const labels={'companion-connect':'正在连接此浏览器…','show-code':'正在生成配对码…','extension-authorize':'正在连接扩展…',connect:'正在连接 UBC…',refresh:'正在检查连接…',disconnect:'正在撤销连接并删除数据…'};
+const labels={'companion-sync':'正在同步…','companion-connect':'正在连接此浏览器…','show-code':'正在生成配对码…','extension-authorize':'正在连接扩展…',connect:'正在连接 UBC…',refresh:'正在检查连接…',disconnect:'正在撤销连接并删除数据…'};
 function feedback(text,state='info'){$('status').textContent=text;$('status').dataset.state=state;}
 function controls(){document.querySelectorAll('button').forEach(b=>b.disabled=busy||(!connected&&['disconnect'].includes(b.id)));document.body.setAttribute('aria-busy',String(busy));document.body.dataset.connected=String(connected);$('account-state').textContent=connected?'已连接':'未连接';$('connect').classList.toggle('secondary',connected);if(!busy)$('connect').textContent=connected?'修复账号绑定':'连接 UBC';}
 async function api(action){const r=await fetch('/ubc/api/'+action,{method:action==='status'?'GET':'POST',credentials:'same-origin',redirect:'error',signal:AbortSignal.timeout(15000),headers:action==='status'?{}:{'Content-Type':'application/json'},...(action==='status'?{}:{body:'{}'})});let x;try{x=await r.json();}catch{throw new Error('服务返回异常。请重新登录 Hub 后重试。');}if(!r.ok)throw new Error(r.status===403?'请先登录 Hub，并确认你的账号可以访问 UBC 个人服务。':x.message||x.error||'请求失败，请重试。');return x;}
@@ -24,7 +24,7 @@ async function status(){const x=await api('status');connected=x.connected;if(ext
 async function run(action,work){if(busy)return;busy=true;controls();const b=$(action),original=b.textContent;b.textContent=labels[action];b.setAttribute('aria-busy','true');feedback(labels[action],'loading');try{await work();}catch(e){feedback(['TimeoutError','AbortError'].includes(e.name)?'连接超时，请检查网络后重试。':e.message||'请求失败，请重试。','error');}finally{b.textContent=original;b.removeAttribute('aria-busy');busy=false;controls();}}
 for(const action of ['connect','refresh','disconnect'])$(action).onclick=async()=>{if(busy)return;if(action==='disconnect'&&!confirm('断开 UBC 并删除服务器保存的当前快照？扩展凭证也将失效。'))return;await run(action,async()=>{if(action!=='refresh'){const result=await api(action);if(result.warning)alert(result.warning);}await status();});};
 $('copy-hub').onclick=async()=>{const v=$('hub-address').textContent;try{await navigator.clipboard.writeText(v);$('copy-hub').textContent='已复制';setTimeout(()=>{$('copy-hub').textContent='复制地址';},2000);}catch{getSelection().selectAllChildren($('hub-address'));feedback('请按 Ctrl+C 或 ⌘C 复制选中的地址。');}};
-const companionHooks={pair:()=>api('pair'),startAccount:async()=>{await api('connect');connected=true;}};
+const companionHooks={pair:()=>api('pair'),startAccount:async()=>{await api('connect');connected=true;},refresh:()=>status()};
 ${companionScript}
 if(extensionState){
   $('extension-login').hidden=false;document.querySelector('main.layout').style.display='none';

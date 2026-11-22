@@ -61,6 +61,10 @@ described below.
 
 - **Connecting turns on automatic sync** and starts the first sync right away.
   You can pause it with Pause automatic sync at any time.
+- **After a browser start and from the Hub page.** About a minute after the
+  browser starts (unless the last sync is under 10 minutes old), when you press
+  立即同步 on the Hub's UBC page, and when you open that page with data more
+  than an hour old, the extension runs the same sync as Sync now.
 - **Background registration sync.** About one minute after sync is turned on
   and then every 15 minutes while the browser is running, the extension makes
   your browser open View My Courses in a background tab, with your existing

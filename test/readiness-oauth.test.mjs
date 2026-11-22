@@ -60,7 +60,8 @@ test('hosted readiness: a bound account reports each state',async t=>{
   const state=async sub=>(await (await ready(await mint(sub))).json());
   const a=await state('nodata');assert.equal(a.state,'needs_setup');assert.equal(a.action.label,'Install the UBC browser companion');assert.notEqual(a.action.url,`${pub}/ubc/`);
   assert.equal((await state('fresh')).state,'ready');
-  const d=await state('old');assert.equal(d.state,'degraded');assert.equal(d.action.label,'Open the UBC companion');
+  // Stale data is fixed from the connection page, where the extension syncs with one click.
+  const d=await state('old');assert.equal(d.state,'degraded');assert.deepEqual(d.action,{label:'Sync now from the UBC page',url:`${pub}/ubc/`});
   assert.equal((await state('gone')).state,'expired');
 });
 test('hosted readiness: wrong issuer, wrong audience, expired, missing sub, unknown key and junk are 401',async t=>{
