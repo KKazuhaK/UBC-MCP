@@ -149,3 +149,15 @@ test('a new installation opens the Hub UBC page; an update does not',async()=>{
  b.installed({reason:'update'});b.installed({reason:'install'});await new Promise(r=>setImmediate(r));
  assert.deepEqual(JSON.parse(JSON.stringify(b.tabs)),[{url:'https://mcp.kazuhahub.com/ubc/'}]);
 });
+test('the default Hub page can ask for a sync now; other pages cannot, and it needs a connection',async()=>{
+ const b=await bridgeBackground(),page={id:'extension-id',tab:{id:3},frameId:0,url:'https://mcp.kazuhahub.com/ubc/'};
+ assert.equal((await b.send({type:'ubc.bridge.sync'},{...page,url:'https://evil.example/ubc/'})).ok,false);
+ const notConnected=await b.send({type:'ubc.bridge.sync'},page);assert.equal(notConnected.ok,false);assert.match(notConnected.error,/Connect this browser/);
+ b.state.ubcConnection={origin:'https://mcp.kazuhahub.com',uploadToken:'t'.repeat(43)};
+ b.state.ubcLastSync={at:'2026-11-20T00:00:00.000Z',count:1};b.state.ubcSyncError='old problem';
+ const status=await b.send({type:'ubc.bridge.status'},page);
+ assert.equal(status.connected,true);assert.equal(status.lastSyncAt,'2026-11-20T00:00:00.000Z');assert.equal(status.syncError,'old problem');
+ // No Workday tab and no Workday access in this stand-in: the page hears why.
+ const r=await b.send({type:'ubc.bridge.sync'},page);
+ assert.equal(r.ok,false);assert.ok(r.error);assert.equal(b.state.ubcAutoSync,true);
+});

@@ -19,7 +19,7 @@ ${companionStep}
 export const script=String.raw`const $=id=>document.getElementById(id);let busy=false,connected=false,csrf='';
 const extensionState=/^#extension-auth=([a-f0-9]{64})$/.exec(typeof location==='undefined'?'':location.hash)?.[1];
 const query=new URLSearchParams(typeof location==='undefined'?'':location.search);
-const labels={'companion-connect':'正在连接此浏览器…','show-code':'正在生成配对码…','extension-authorize':'正在连接扩展…',refresh:'正在检查连接…',forget:'正在清除…',disconnect:'正在跳转到 MCPHub…'};
+const labels={'companion-sync':'正在同步…','companion-connect':'正在连接此浏览器…','show-code':'正在生成配对码…','extension-authorize':'正在连接扩展…',refresh:'正在检查连接…',forget:'正在清除…',disconnect:'正在跳转到 MCPHub…'};
 const notices={disconnected:['已断开连接，并删除了服务器上的快照与凭证。','success'],'disconnected-warning':['连接已撤销，但未能删除 MCPHub 中保存的凭证。请在 MCPHub 的凭证页面手动移除。','error']};
 function feedback(text,state='info'){$('status').textContent=text;$('status').dataset.state=state;}
 function controls(){document.querySelectorAll('button').forEach(b=>b.disabled=busy||(!connected&&['disconnect','forget'].includes(b.id)));document.body.setAttribute('aria-busy',String(busy));document.body.dataset.connected=String(connected);$('account-state').textContent=connected?'已连接':'未连接';$('forget').hidden=!connected;$('connect').classList.toggle('secondary',connected);if(!busy)$('connect').textContent=connected?'重新连接 MCPHub':'Connect with MCPHub';}
@@ -34,7 +34,7 @@ $('refresh').onclick=()=>run('refresh',status);
 $('copy-hub').onclick=async()=>{const v=$('hub-address').textContent;try{await navigator.clipboard.writeText(v);$('copy-hub').textContent='已复制';setTimeout(()=>{$('copy-hub').textContent='复制地址';},2000);}catch{getSelection().selectAllChildren($('hub-address'));feedback('请按 Ctrl+C 或 ⌘C 复制选中的地址。');}};
 $('forget').onclick=()=>run('forget',async()=>{await api('api/forget',true);await status();});
 $('disconnect').onclick=()=>{if(busy||!confirm('断开 UBC 并删除服务器保存的当前快照？需要先向 MCPHub 重新授权，扩展凭证也将失效。'))return;return run('disconnect',async()=>{const x=await api('oauth/start',{intent:'disconnect'});if(!/^https?:\/\//.test(x.authorizeUrl||''))throw new Error('请求失败，请重试。');location.assign(x.authorizeUrl);});};
-const companionHooks={pair:()=>api('api/pair',true),startAccount:async()=>{location.assign('/ubc/oauth/start');return 'redirect';}};
+const companionHooks={pair:()=>api('api/pair',true),startAccount:async()=>{location.assign('/ubc/oauth/start');return 'redirect';},refresh:()=>status()};
 ${companionScript}
 if(extensionState){
   $('extension-login').hidden=false;document.querySelector('main.layout').style.display='none';

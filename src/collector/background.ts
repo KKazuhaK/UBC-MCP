@@ -12,6 +12,10 @@ const workdayOrigin='https://wd10.myworkday.com/ubc/';
 // The UBC tenant's observed read-only View My Courses task.
 const registrationsUrl=workdayOrigin+'d/task/2998$28771.htmld';
 const alarmName='ubc-registration-sync';
+/** One run shortly after the browser starts, so data is fresh without waiting for the 15-minute alarm. */
+const startupAlarm='ubc-startup-sync';
+/** A page or startup request skips the sync if the last one is this recent. */
+const FRESH_MS=10*60_000;
 let registrationRun:Promise<{ok:boolean;count:number;error:string}>|undefined;
 async function injectWorkday(id:number,url:string){
   const state=await api.storage.local.get(['ubcConnection','ubcUploadToken','ubcAutoSync']);
@@ -75,6 +79,8 @@ async function syncAll(){
     if(result.ok){readable++;count+=result.count;}
     else lastError=result.error;
   }
+  // A readable run counts as a sync even when nothing changed, so "last sync" means last checked.
+  if(readable)await api.storage.local.set({ubcLastSync:{at:new Date().toISOString(),count}});
   return {ok:true,tabs:tabs.length,readable,count,error:lastError};
 }
 /** Spends a pairing code at the Hub and saves the connection; automatic sync starts right away. */
@@ -138,6 +144,15 @@ function resumeIntent(){
   })().finally(()=>{resuming=undefined;});
   return resuming;
 }
+/** After a browser start: sync once unless a recent sync already ran. */
+async function startupSync(){
+  const state=await api.storage.local.get(['ubcConnection','ubcAutoSync','ubcLastSync']);
+  if(!state.ubcAutoSync||!storedConnection(state))return;
+  const last=Date.parse((state.ubcLastSync as {at?:string}|undefined)?.at??'');
+  if(Number.isFinite(last)&&Date.now()-last<FRESH_MS)return;
+  const result=await syncAll();
+  if(result.error)await api.storage.local.set({ubcSyncError:result.error});
+}
 async function inject(tabId:number,url:string){
   const {ubcAuthorization:a}=await api.storage.local.get('ubcAuthorization') as {ubcAuthorization?:Authorization};
   if(!a||a.status!=='pending'||a.tabId!==tabId||a.expires<Date.now())return;
@@ -200,8 +215,19 @@ async function handle(message:any,sender:chrome.runtime.MessageSender){
   }
   if(message.type==='ubc.bridge.status'){
     if(!bridgePage(sender))throw new Error('Request refused.');
+    const state=await api.storage.local.get(['ubcConnection','ubcAutoSync','ubcLastSync','ubcSyncError']);
+    const connection=storedConnection(state);
+    return {ok:true,connected:!!connection&&connection.origin===DEFAULT_HUB,autoSync:!!state.ubcAutoSync,lastSyncAt:(state.ubcLastSync as {at?:string}|undefined)?.at??null,syncError:state.ubcSyncError??null};
+  }
+  if(message.type==='ubc.bridge.sync'){
+    if(!bridgePage(sender))throw new Error('Request refused.');
     const connection=storedConnection(await api.storage.local.get(['ubcConnection']));
-    return {ok:true,connected:!!connection&&connection.origin===DEFAULT_HUB};
+    if(!connection||connection.origin!==DEFAULT_HUB)throw new Error('Connect this browser first.');
+    // The page's own request turns sync back on: it is an explicit "sync now".
+    await api.storage.local.set({ubcAutoSync:true});
+    const result=await syncAll();
+    await api.storage.local.set({ubcSyncError:result.error||null});
+    return {ok:!!result.readable,count:result.count,error:result.error||(result.readable?'':'Could not read Workday. Sign in to Workday in this browser and try again.')};
   }
   if(message.type==='ubc.bridge.claim'){
     if(!bridgePage(sender))throw new Error('Request refused.');
@@ -225,7 +251,7 @@ async function handle(message:any,sender:chrome.runtime.MessageSender){
   throw new Error('Unknown request.');
 }
 api.runtime.onMessage.addListener((message,sender,sendResponse)=>{
-  if(!['ubc.authorize.start','ubc.authorize.claim','ubc.intent.resume','ubc.pair.manual','ubc.bridge.status','ubc.bridge.claim','ubc.sync.enabled','ubc.sync.stop','ubc.sync.configure','ubc.sync.snapshots','ubc.sync.all'].includes(message?.type))return false;
+  if(!['ubc.authorize.start','ubc.authorize.claim','ubc.intent.resume','ubc.pair.manual','ubc.bridge.status','ubc.bridge.claim','ubc.bridge.sync','ubc.sync.enabled','ubc.sync.stop','ubc.sync.configure','ubc.sync.snapshots','ubc.sync.all'].includes(message?.type))return false;
   void handle(message,sender).then(sendResponse,e=>{
     const error=e instanceof Error?e.message:'Connection failed.';
     if(message.type==='ubc.sync.snapshots'&&sender.id===api.runtime.id&&sender.url?.startsWith(workdayOrigin))void api.storage.local.set({ubcSyncError:error});
@@ -234,7 +260,7 @@ api.runtime.onMessage.addListener((message,sender,sendResponse)=>{
 });
 api.tabs.onUpdated.addListener((id,change,tab)=>{if(change.status==='complete'&&tab.url){void inject(id,tab.url).catch(()=>{});if(tab.url.startsWith(workdayOrigin))void injectWorkday(id,tab.url).catch(()=>{});}});
 api.runtime.onStartup?.addListener(()=>{void workdayTabs().then(tabs=>Promise.all(tabs.map(t=>t.id&&t.url?injectWorkday(t.id,t.url):false))).catch(()=>{});});
-api.runtime.onStartup?.addListener(()=>{void configureAlarm().catch(()=>{});});
+api.runtime.onStartup?.addListener(()=>{void configureAlarm().catch(()=>{});void api.alarms?.create(startupAlarm,{delayInMinutes:1});});
 api.runtime.onInstalled?.addListener(details=>{
   void configureAlarm().catch(()=>{});
   // A new installation opens the Hub's UBC page, where one click connects this browser.
@@ -242,6 +268,7 @@ api.runtime.onInstalled?.addListener(details=>{
 });
 api.permissions?.onAdded?.addListener(()=>{void resumeIntent().catch(()=>{});});
 api.alarms?.onAlarm.addListener(alarm=>{
+  if(alarm.name===startupAlarm){void startupSync().catch(()=>{});return;}
   if(alarm.name!==alarmName)return;
   void syncRegistrations().then(async result=>{if(!result.ok)await api.storage.local.set({ubcSyncError:result.error});}).catch(()=>{});
 });

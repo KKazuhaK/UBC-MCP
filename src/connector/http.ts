@@ -42,12 +42,13 @@ export function connectorServer(store:Store,adapter?:PlatformAdapter|null,mcp?:M
       }
       const b=readinessRecent.get(id??`sub:${oauthSubject}`,now);b.count++;
       if(b.count>60)return json(res,429,{error:'RATE_LIMITED'});
+      const page=adapter?.handles('/ubc/')&&mcp!.config.origin.startsWith('https://')?`${mcp!.config.origin}/ubc/`:null;
       if(!id)return json(res,200,readiness({lastUploadedAt:null,newestCapturedAt:null,servable:false,staleDays:0},now,readinessConfig,
-        {action:adapter?.handles('/ubc/')&&mcp!.config.origin.startsWith('https://')?{label:'Connect your UBC data',url:`${mcp!.config.origin}/ubc/`}:null}));
+        {action:page?{label:'Connect your UBC data',url:page}:null}));
       try {
         const summary=store.summary(id);
         if(!summary)return json(res,401,{error:'UNAUTHORIZED'});
-        return json(res,200,readiness(summary,now,readinessConfig));
+        return json(res,200,readiness(summary,now,readinessConfig,undefined,page));
       }catch{return json(res,500,{error:'INTERNAL_ERROR'});}
     }
     if (req.url==='/healthz'&&req.method==='GET') return json(res,200,{ok:true,version:VERSION});

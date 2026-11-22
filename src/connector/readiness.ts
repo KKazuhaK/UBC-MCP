@@ -32,8 +32,9 @@ export type ReadinessSummary={lastUploadedAt:number|null;newestCapturedAt:string
  * older than the threshold -> degraded; uploaded before but nothing is served any more (past the window, or purged) -> expired.
  * Carries no tokens, snapshot content or course data.
  */
-export function readiness(summary:ReadinessSummary,now:number,config:ReadinessConfig=DEFAULT_READINESS,unbound?:{action:{label:string;url:string}|null}) {
-  const checked_at=new Date(now).toISOString(),action={label:'Open the UBC companion',url:config.installUrl};
+export function readiness(summary:ReadinessSummary,now:number,config:ReadinessConfig=DEFAULT_READINESS,unbound?:{action:{label:string;url:string}|null},page?:string|null) {
+  // Stale data is fixed from the connection page, where the extension syncs with one click.
+  const checked_at=new Date(now).toISOString(),action=page?{label:'Sync now from the UBC page',url:page}:{label:'Open the UBC companion',url:config.installUrl};
   if(summary.lastUploadedAt===null&&!summary.newestCapturedAt) {
     // A signed-in user with no binding has to connect first; the companion comes after.
     if(unbound)return {version:1,state:'needs_setup',summary:"Your UBC data isn't connected to this account yet. Connect it, then sync from Workday with the UBC companion.",
