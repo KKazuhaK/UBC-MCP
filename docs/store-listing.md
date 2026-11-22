@@ -56,10 +56,11 @@ and the Firefox summary):
 >   number before anything is sent.
 > - Site access is limited to UBC Workday and the default MCPHub; any other
 >   MCPHub address is asked for when you connect to it.
-> - Automatic sync: once you connect, the extension opens View My Courses in a
->   background tab every 15 minutes, reads it and closes it, and also reads
->   recognized Workday pages you open. Pause automatic sync or disconnect at
->   any time.
+> - Automatic sync: the extension reads recognized Workday pages you open. It
+>   never opens Workday by itself; when your data gets old (you choose how old)
+>   it opens a reminder page instead. Sync now opens View My Courses in a
+>   background tab, reads it and closes it. Pause automatic sync or disconnect
+>   at any time.
 >
 > You need an MCPHub server with the UBC connector (open-source:
 > https://github.com/KKazuhaK/UBC-MCP). This is an independent project and is
@@ -91,7 +92,7 @@ Other.
 | `scripting` | Runs the capture script in UBC Workday tabs to read the course sections and registrations shown there, and reads the one-time connection code from the MCPHub approval tab the user opened. |
 | `downloads` | Export saves the captured data as a JSON file to a place the user chooses (a Save As dialog opens). |
 | `storage` | Keeps the MCPHub address, the upload credential, whether automatic sync is on and the last sync status on this device. |
-| `alarms` | Runs the registration sync every 15 minutes while automatic sync is on. |
+| `alarms` | Every 15 minutes while automatic sync is on: syncs the Workday pages already open and, when the data is older than the user's chosen age, opens the extension's reminder page. |
 | Host permissions (`https://wd10.myworkday.com/*`, `https://mcp.kazuhahub.com/*`) | UBC Workday, to read the course and registration pages the extension syncs; and the default MCPHub, to upload them. |
 | Content script (`https://mcp.kazuhahub.com/ubc/*`) | A small bridge on the default MCPHub's UBC page lets its "Connect this browser" button hand the extension a one-time pairing code. It reads nothing else on the page. |
 | Host permissions (optional, `https://*/*`) | Requested at runtime only for another MCPHub address the user enters. Each self-hosted MCPHub has its own address, so it cannot be listed in advance. |
@@ -108,7 +109,7 @@ Leave the others unticked. Tick all three certifications (not sold, not used
 for unrelated purposes, not used for creditworthiness).
 
 **Test instructions** (Chrome's reviewer notes; the description and the
-privacy policy also describe the background tab, so it is not read as hidden
+privacy policy also describe the background tab Sync now opens, so it is not read as hidden
 behaviour): use the Edge certification notes below.
 
 ## Microsoft Edge Add-ons (Partner Center)
@@ -119,7 +120,7 @@ Edge takes the Chrome zip unchanged. Use the shared text above.
   same URL.
 - **Notes for certification:**
 
-> The extension needs a UBC Workday account and an MCPHub server with the UBC connector to do anything beyond its popup. To try the connection flow: installing the extension opens https://mcp.kazuhahub.com/ubc/ (the popup's Open MCPHub to connect does the same); sign in there and press "连接此浏览器" (Connect this browser). The popup's "Another MCPHub, or a pairing code" section is the manual fallback. With automatic sync on, the extension opens View My Courses in a background tab every 15 minutes, reads it and closes it. Source: https://github.com/KKazuhaK/UBC-MCP (build: npm ci && npm run build:extension; output in extension/).
+> The extension needs a UBC Workday account and an MCPHub server with the UBC connector to do anything beyond its popup. To try the connection flow: installing the extension opens https://mcp.kazuhahub.com/ubc/ (the popup's Open MCPHub to connect does the same); sign in there and press "连接此浏览器" (Connect this browser). The popup's "Another MCPHub, or a pairing code" section is the manual fallback. Background checks never open Workday: they sync the Workday pages already open and, when the data is older than the chosen age (3 days by default), open the extension's reminder page. Sync now opens View My Courses in a background tab, reads it and closes it. Source: https://github.com/KKazuhaK/UBC-MCP (build: npm ci && npm run build:extension; output in extension/).
 
 After the product exists, Partner Center > Publish API (v1.1) gives the Client
 ID and API key for `EDGE_CLIENT_ID` and `EDGE_API_KEY`; the product id from the

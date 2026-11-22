@@ -1,6 +1,7 @@
 import {hubOrigin,storedConnection} from './connection.js';
 import {parseSnapshot} from '../model.js';
-import {DEFAULT_HUB,HUB_PAGE_PATH} from './defaults.js';
+import {DEFAULT_HUB,HUB_PAGE_PATH,WORKDAY_ORIGIN,WORKDAY_REGISTRATIONS_URL} from './defaults.js';
+import {IGNORED_SNOOZE_MS,reminderDue} from './reminder-policy.js';
 declare const browser:typeof chrome;
 const api=typeof browser!=='undefined'?browser:chrome;
 const token=(v:unknown):v is string=>typeof v==='string'&&/^[\w-]{43}$/.test(v);
@@ -8,11 +9,11 @@ type Intent={type:'authorize'|'pair';origin:string;code?:string;at:number};
 const INTENT_TTL=5*60_000;
 type Authorization={origin:string;state:string;expires:number;tabId?:number;status:'pending'|'connected'|'error';message?:string};
 let claiming=false;
-const workdayOrigin='https://wd10.myworkday.com/ubc/';
-// The UBC tenant's observed read-only View My Courses task.
-const registrationsUrl=workdayOrigin+'d/task/2998$28771.htmld';
+const workdayOrigin=WORKDAY_ORIGIN;
+const registrationsUrl=WORKDAY_REGISTRATIONS_URL;
+/** Every 15 minutes: sync the Workday pages already open, then remind if the data is old. */
 const alarmName='ubc-registration-sync';
-/** One run shortly after the browser starts, so data is fresh without waiting for the 15-minute alarm. */
+/** One check shortly after the browser starts. */
 const startupAlarm='ubc-startup-sync';
 /** A page or startup request skips the sync if the last one is this recent. */
 const FRESH_MS=10*60_000;
@@ -62,8 +63,12 @@ function syncRegistrations(){
   })().finally(()=>{registrationRun=undefined;});
   return registrationRun;
 }
-async function syncAll(){
-    await configureAlarm();
+/**
+ * Syncs the open Workday pages. Only a sync the person asked for (Sync now, the Hub page, connecting)
+ * may open View My Courses in a background tab; background checks never open Workday on their own.
+ */
+async function syncAll(openWorkday=true){
+  await configureAlarm();
   const tabs=await workdayTabs();let count=0,readable=0,lastError='',registrationSynced=false;
   for(const tab of tabs){
     if(!tab.id||!tab.url)continue;
@@ -74,7 +79,7 @@ async function syncAll(){
       else if(result?.error&&!result.error.startsWith('No complete supported'))lastError=result.error;
     }catch{lastError='Could not access an open Workday tab. Check Workday site permission and reload that page.';}
   }
-  if(!registrationSynced){
+  if(!registrationSynced&&openWorkday){
     const result=await syncRegistrations();
     if(result.ok){readable++;count+=result.count;}
     else lastError=result.error;
@@ -91,7 +96,7 @@ async function claimConnection(origin:string,code:string){
   if(!r.ok){await r.body?.cancel();throw new Error(r.status===400||r.status===401?'That pairing code is invalid, expired or already used. Get a new one on the MCPHub UBC page.':`Connection failed (HTTP ${r.status}). Please try again.`);}
   const body=await r.json();if(!token(body.uploadToken))throw new Error('The connector returned an invalid credential.');
   // Pairing credentials never go to the webpage or to browser sync by default.
-  await api.storage.local.set({ubcConnection:{origin,uploadToken:body.uploadToken},ubcAutoSync:true,ubcSyncError:null,ubcAuthorization:{origin,status:'connected',message:'Connected through MCPHub.'}});
+  await api.storage.local.set({ubcConnection:{origin,uploadToken:body.uploadToken},ubcConnectedAt:new Date().toISOString(),ubcSnoozeUntil:null,ubcAutoSync:true,ubcSyncError:null,ubcAuthorization:{origin,status:'connected',message:'Connected through MCPHub.'}});
   await api.storage.local.remove('ubcUploadToken');
   void configureAlarm().catch(()=>{});
   // The first sync runs now instead of waiting for the next alarm.
@@ -144,14 +149,28 @@ function resumeIntent(){
   })().finally(()=>{resuming=undefined;});
   return resuming;
 }
-/** After a browser start: sync once unless a recent sync already ran. */
-async function startupSync(){
+/** A background check (alarm or browser start): sync open Workday pages, then remind if the data is old. */
+async function backgroundCheck(){
   const state=await api.storage.local.get(['ubcConnection','ubcAutoSync','ubcLastSync']);
   if(!state.ubcAutoSync||!storedConnection(state))return;
   const last=Date.parse((state.ubcLastSync as {at?:string}|undefined)?.at??'');
-  if(Number.isFinite(last)&&Date.now()-last<FRESH_MS)return;
-  const result=await syncAll();
-  if(result.error)await api.storage.local.set({ubcSyncError:result.error});
+  if(!Number.isFinite(last)||Date.now()-last>=FRESH_MS){
+    const result=await syncAll(false);
+    if(result.error&&result.readable)await api.storage.local.set({ubcSyncError:result.error});
+  }
+  await maybeRemind();
+}
+const reminderPage=()=>api.runtime.getURL('reminder.html');
+/** Opens the reminder page (not Workday) when the data is older than the person's chosen age. */
+async function maybeRemind(){
+  const s=await api.storage.local.get(['ubcConnection','ubcAutoSync','ubcLastSync','ubcConnectedAt','ubcRemindAfterHours','ubcSnoozeUntil']);
+  if(!s.ubcAutoSync||!storedConnection(s))return;
+  const now=Date.now();
+  if(!reminderDue({lastSyncAt:(s.ubcLastSync as {at?:string}|undefined)?.at??null,connectedAt:(s.ubcConnectedAt as string|undefined)??null,remindAfterHours:s.ubcRemindAfterHours,snoozeUntil:s.ubcSnoozeUntil},now))return;
+  if((await api.tabs.query({url:reminderPage()})).length)return;
+  // Ignoring the page snoozes it, so it comes back later instead of on every check.
+  await api.storage.local.set({ubcSnoozeUntil:now+IGNORED_SNOOZE_MS});
+  await api.tabs.create({url:reminderPage()});
 }
 async function inject(tabId:number,url:string){
   const {ubcAuthorization:a}=await api.storage.local.get('ubcAuthorization') as {ubcAuthorization?:Authorization};
@@ -268,9 +287,8 @@ api.runtime.onInstalled?.addListener(details=>{
 });
 api.permissions?.onAdded?.addListener(()=>{void resumeIntent().catch(()=>{});});
 api.alarms?.onAlarm.addListener(alarm=>{
-  if(alarm.name===startupAlarm){void startupSync().catch(()=>{});return;}
-  if(alarm.name!==alarmName)return;
-  void syncRegistrations().then(async result=>{if(!result.ok)await api.storage.local.set({ubcSyncError:result.error});}).catch(()=>{});
+  if(alarm.name!==startupAlarm&&alarm.name!==alarmName)return;
+  void backgroundCheck().catch(()=>{});
 });
 void configureAlarm().catch(()=>{});
 void Promise.resolve().then(()=>api.storage.local.remove('ubcProbe')).catch(()=>{});

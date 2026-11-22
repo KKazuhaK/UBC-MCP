@@ -527,7 +527,7 @@ proxy instead of the whole `Cookie` header.
 
 ### Self-service connection (alpha.2)
 
-With the optional self-service routes deployed, enter your own MCPHub HTTPS origin in the extension, grant access, and approve the connection in Hub. The extension automatically opens a temporary background registration page and syncs it every 15 minutes while the browser and Workday session remain available. Recognized course-search pages are synced while open. A manual sync button and offline JSON export remain available.
+With the optional self-service routes deployed, enter your own MCPHub HTTPS origin in the extension, grant access, and approve the connection in Hub. Recognized Workday pages are synced while open, checked every 15 minutes. The extension never opens Workday by itself: when the data is older than the chosen age (3 days by default), it opens a reminder page instead. Sync now opens a temporary background registration page. A manual sync button and offline JSON export remain available.
 
 The connection page calls existing Hub APIs as the signed-in user to save only
 that user's READ credential. It does not change Hub source, server configuration
@@ -553,4 +553,4 @@ needed. The connector verifies the current Hub session and existing access to th
 Hub server before issuing the upload-only credential. This is session reuse rather
 than a new OAuth server (this is the deprecated `mcphub` adapter; prefer `mcphub-oauth`). An outdated connector is reported before authorization.
 
-Credentials remain bound to their original origin when switching servers. The extension syncs registrations through a temporary background Workday tab every 15 minutes, plus recognized open course-search pages. A manual sync button and a pause control are available. It does not fetch the full catalog.
+Credentials remain bound to their original origin when switching servers. The extension syncs recognized open Workday pages and reminds the user when the data gets old; Sync now syncs registrations through a temporary background Workday tab. A manual sync button and a pause control are available. It does not fetch the full catalog.

@@ -21,3 +21,4 @@ extension-firefox/
 extension/auto-sync.js
 extension/icons/
 extension/bridge.js
+extension/reminder.js
