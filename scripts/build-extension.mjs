@@ -2,6 +2,7 @@ import {hubDefine} from './default-hub.mjs';
 import {copyFile,cp} from 'node:fs/promises';
 import {build} from 'esbuild';
 await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'esm',target:'chrome120',outfile:'extension/popup.js',legalComments:'none',define:hubDefine()});
+await build({entryPoints:['src/collector/reminder.ts'],bundle:true,platform:'browser',format:'esm',target:'chrome120',outfile:'extension/reminder.js',legalComments:'none',define:hubDefine()});
 await build({entryPoints:['src/collector/background.ts'],bundle:true,platform:'browser',format:'esm',target:'chrome120',outfile:'extension/background.js',legalComments:'none',define:hubDefine()});
 await build({entryPoints:['src/collector/hub-link.ts'],bundle:true,platform:'browser',format:'iife',target:'chrome120',outfile:'extension/hub-link.js',legalComments:'none',define:hubDefine()});
 await build({entryPoints:['src/collector/bridge.ts'],bundle:true,platform:'browser',format:'iife',target:'chrome120',outfile:'extension/bridge.js',legalComments:'none',define:hubDefine()});

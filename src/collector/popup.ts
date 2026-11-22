@@ -4,6 +4,7 @@ import {extractWorkdayDom} from './dom.js';
 import {normalizeCapture} from './normalize.js';
 import {extractRegistrationDom,normalizeRegistrations} from './registrations.js';
 import {DEFAULT_HUB,HUB_PAGE_PATH} from './defaults.js';
+import {remindHours} from './reminder-policy.js';
 declare const browser:typeof chrome;
 const extensionApi=typeof browser!=='undefined'?browser:chrome;
 const el=(id:string)=>document.getElementById(id)!;
@@ -33,7 +34,10 @@ async function action(id:string,label:string,work:()=>Promise<void>) {
   finally{busy=false;document.body.setAttribute('aria-busy','false');if(button.tagName==='BUTTON'){if(id!=='auto-toggle'||!completed)button.textContent=original;button.removeAttribute('aria-busy');}controls();}
 }
 async function showConnection() {
-  const x=await extensionApi.storage.local.get(['ubcConnection','ubcHubOrigin','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']) as Record<string,any>;const connection=storedConnection(x);paired=!!connection;
+  const x=await extensionApi.storage.local.get(['ubcConnection','ubcHubOrigin','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError','ubcRemindAfterHours']) as Record<string,any>;
+  // Mark the option rather than set select.value, which not every DOM implements.
+  const chosen=String(remindHours(x.ubcRemindAfterHours));
+  document.querySelectorAll<HTMLOptionElement>('#remind-after option').forEach(o=>{if(o.value===chosen)o.setAttribute('selected','');else o.removeAttribute('selected');});const connection=storedConnection(x);paired=!!connection;
   autoSync=!!x.ubcAutoSync;
   el('connection').textContent=connection?`Connected · ${connection.origin}`:'Not connected yet.';
   el('connect-setup').hidden=paired;el('connected-actions').hidden=!paired;
@@ -62,7 +66,7 @@ async function initialize(){
 }
 void initialize();
 el('forget').onclick=()=>action('forget','Removing local connection…',async()=>{
-  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError']);pending=[];el('preview').textContent='';await showConnection();
+  await extensionApi.storage.local.remove(['ubcUploadToken','ubcConnection','ubcAuthorization','ubcAutoSync','ubcLastSync','ubcSyncError','ubcConnectedAt','ubcSnoozeUntil']);pending=[];el('preview').textContent='';await showConnection();
   try{await extensionApi.runtime.sendMessage({type:'ubc.sync.stop'});}catch{/* The local connection is already removed. */}
   feedback('Local connection removed. To revoke server access and delete snapshots, use the connection page.','success');
 });
@@ -176,4 +180,10 @@ if(extensionApi.storage.onChanged)extensionApi.storage.onChanged.addListener((ch
     else if(a?.status==='error')feedback(a.message??'Connection failed. Try again.','error');
     controls();
   }).catch(()=>feedback('Could not read your connection. Reopen the popup.','error'));
+});
+const remindSelect=document.getElementById('remind-after') as HTMLSelectElement|null;
+if(remindSelect)remindSelect.onchange=()=>action('remind-after','Saving…',async()=>{
+  const hours=remindHours(Number(remindSelect.value));
+  await extensionApi.storage.local.set({ubcRemindAfterHours:hours,ubcSnoozeUntil:null});
+  feedback(hours?'Reminder saved.':'Reminders are off.','success');
 });

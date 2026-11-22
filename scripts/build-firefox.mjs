@@ -8,8 +8,10 @@ manifest.background={scripts:['background.js']};
 manifest.browser_specific_settings={gecko:{id:process.env.UBC_FIREFOX_ADDON_ID||'ubc-course-capture@mcp.kazuhahub.com',strict_min_version:'142.0',data_collection_permissions:{required:['authenticationInfo','personallyIdentifyingInfo','websiteContent']}}};
 await writeFile(out+'/manifest.json',JSON.stringify(manifest,null,2)+'\n');
 await copyFile('extension/popup.html',out+'/popup.html');
+await copyFile('extension/reminder.html',out+'/reminder.html');
 await cp('src/collector/icons',out+'/icons',{recursive:true,force:true,filter:src=>!src.endsWith('.svg')});
 await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'esm',target:'firefox142',outfile:out+'/popup.js',legalComments:'none',define:hubDefine()});
+await build({entryPoints:['src/collector/reminder.ts'],bundle:true,platform:'browser',format:'esm',target:'firefox142',outfile:out+'/reminder.js',legalComments:'none',define:hubDefine()});
 console.log('Prepared Firefox submission directory: '+out+' (unsigned; signing required for persistent installation)');
 
 await copyFile('LICENSE',out+'/LICENSE.txt');

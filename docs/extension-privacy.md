@@ -61,16 +61,19 @@ described below.
 
 - **Connecting turns on automatic sync** and starts the first sync right away.
   You can pause it with Pause automatic sync at any time.
-- **After a browser start and from the Hub page.** About a minute after the
-  browser starts (unless the last sync is under 10 minutes old), when you press
-  立即同步 on the Hub's UBC page, and when you open that page with data more
-  than an hour old, the extension runs the same sync as Sync now.
-- **Background registration sync.** About one minute after sync is turned on
-  and then every 15 minutes while the browser is running, the extension makes
-  your browser open View My Courses in a background tab, with your existing
-  Workday sign-in. It reads the page, uploads the result and closes the tab (it
-  leaves the tab open if you have switched to it). If you are signed out,
-  nothing is read.
+- **Background checks never open Workday.** About a minute after the browser
+  starts and every 15 minutes while it runs, the extension syncs the UBC Workday
+  pages you already have open. It does not open Workday by itself.
+- **Reminders.** When your data is older than the age you choose (1 day, 3 days
+  by default, 1 week, or never), the extension opens a reminder page with a
+  button to open Workday. Snoozing it, or ignoring it, keeps it away for a
+  while.
+- **When you ask for a sync.** Sync now in the popup, 立即同步 on the Hub's UBC
+  page (also run when you open that page with data more than an hour old) and
+  connecting make your browser open View My Courses in a background tab, with
+  your existing Workday sign-in. The extension reads the page, uploads the
+  result and closes the tab (it leaves the tab open if you have switched to
+  it). If you are signed out, nothing is read.
 - **Pages you open.** While automatic sync is on, the extension also runs on
   each UBC Workday page you load. When the page shows recognized course
   sections or a complete registration table, it uploads them a few seconds
@@ -97,7 +100,7 @@ without browser cookies:
 Like any web request, these reveal your IP address, the time and your browser
 version to that server, and carry the extension's own origin
 (`chrome-extension://…` or `moz-extension://…`). The extension itself makes no
-requests to Workday; the background tab it opens is an ordinary page load by
+requests to Workday; the background tab it opens when you ask for a sync is an ordinary page load by
 your browser, with your Workday cookies, as if you had opened it.
 
 **Connecting.** Connect with MCPHub opens the UBC connection page on your MCPHub
