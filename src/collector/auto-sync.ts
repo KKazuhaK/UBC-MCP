@@ -5,6 +5,7 @@ import type {Snapshot} from '../model.js';
 declare const browser:typeof chrome;
 const api=typeof browser!=='undefined'?browser:chrome;
 const marker='__ubcCourseCaptureAutoSync';
+const OPEN_ATTEMPTS=[1500,4000,8000,15000];
 const root=globalThis as unknown as Record<string,unknown>;
 if(!root[marker]){
   root[marker]=true;
@@ -50,7 +51,11 @@ if(!root[marker]){
     }catch{return {ok:false,error:'Could not read or sync this Workday page.'};}
     finally{running=false;}
   }
-  const schedule=()=>{if(timer)clearTimeout(timer);timer=setTimeout(()=>{void run();},5000);};
+  // After the page settles: Workday keeps re-rendering, so this alone could wait for minutes.
+  const schedule=()=>{if(timer)clearTimeout(timer);timer=setTimeout(()=>{void run();},3000);};
+  // Opening a Workday page syncs right away: a few early attempts while it renders.
+  let openedSynced=false;
+  for(const ms of OPEN_ATTEMPTS)setTimeout(()=>{if(!openedSynced)void run().then(r=>{if(r.ok)openedSynced=true;});},ms);
   api.runtime.onMessage.addListener((message,sender,sendResponse)=>{
     if(message?.type!=='ubc.sync.now'||sender.id!==api.runtime.id)return false;
     void run(true).then(sendResponse);return true;
