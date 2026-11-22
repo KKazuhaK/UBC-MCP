@@ -1,9 +1,10 @@
 # Store listings: UBC Course Capture
 
 What to enter when the extension is first listed in each store by hand. After
-the first listing, `.github/workflows/browser-extension-release.yml` uploads
-each stable release (or a manual run with `submit_to_stores`) automatically;
-the workflow header lists the variables and secrets. Keep this file in step
+the first listing, `.github/workflows/browser-extension-release.yml` submits
+each new extension version (a version bump in `extension/manifest.json` merged
+to `main`) automatically; [store-publishing.md](store-publishing.md) covers the
+API credentials and how to store them. Keep this file in step
 with [the privacy policy](extension-privacy.md) and `extension/manifest.json`.
 
 ## Before the first upload

@@ -7,14 +7,16 @@ The default MCPHub (`https://mcp.kazuhahub.com`) is named only in `extension/man
 
 ## Release assets
 
-`.github/workflows/browser-extension-release.yml` runs when a release is
-published (prereleases included) or by hand for an existing tag. It tests,
-makes both builds, lints the Firefox build and attaches to the release:
+`.github/workflows/browser-extension-release.yml` runs when a push to `main`
+changes the version in `extension/manifest.json` (it then creates the release
+`extension-v<version>`), when a release is published (prereleases included),
+or by hand for an existing tag. It tests, makes both builds, lints the Firefox
+build and attaches to the release:
 
 - `ubc-course-capture-chrome-<version>.zip`: load unpacked, or upload to the Chrome Web Store;
 - `ubc-course-capture-firefox-<version>-unsigned.zip`: for Mozilla signing; Firefox
   does not install it permanently as is;
-- `ubc-course-capture-source-<version>.zip`: `git archive` of the tag, for Add-ons review;
+- `ubc-course-capture-source-<version>.zip`: `git archive` of the release commit, for Add-ons review;
 - `ubc-course-capture-<version>-SHA256SUMS.txt`.
 
 `<version>` is the `version` in `extension/manifest.json`, which is separate
@@ -25,9 +27,14 @@ web-ext comes from `release/tools/package-lock.json`, installed with
 
 ## Store submission
 
-Store jobs skip until configured, and then run only for a stable (non-prerelease)
-release, or a manual run with `submit_to_stores`. The first listing in each
-store is created by hand; the workflow header lists the variables and secrets.
+Store jobs skip until configured, and then run for a new `extension-v<version>`
+release (made from a version bump on `main`, or a stable one published by hand),
+or a manual run with `submit_to_stores`. A server release (`v*`) attaches the
+zips but does not submit. The first listing in each store is created by hand:
+[store-publishing.md](store-publishing.md) covers the listings, the API
+credentials and the `gh` commands that store them. The **Check store
+configuration** job summarizes which stores are ready and fails when one is
+half configured.
 A store refuses a version it already has.
 
 - Chrome Web Store: upload and publish through API v2.
