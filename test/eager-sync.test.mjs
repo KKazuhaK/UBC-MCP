@@ -57,3 +57,28 @@ test('reminder policy: chosen age, snooze, first sync measured from connecting',
  assert.equal(reminderDue({lastSyncAt:at(500),snoozeUntil:now+1},now),false);
  assert.equal(reminderDue({connectedAt:at(80)},now),true);assert.equal(reminderDue({},now),false);
 });
+test('a Workday page syncs within seconds of opening, even while it keeps re-rendering',async()=>{
+ const {parseHTML}=await import('linkedom');
+ const {document}=parseHTML('<html><body></body></html>');
+ const timers=[];const calls=[];
+ const chrome={runtime:{id:'ext',onMessage:{addListener:()=>{}},sendMessage:async msg=>{calls.push(msg.type);return msg.type==='ubc.sync.enabled'?{ok:true,enabled:true}:{ok:true};}}};
+ const bundle=await build({entryPoints:['src/collector/auto-sync.ts'],bundle:true,platform:'browser',format:'iife',write:false});
+ runInNewContext(bundle.outputFiles[0].text,{document,chrome,MutationObserver:class{observe(){}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout:()=>{},setInterval:()=>1,console});
+ const early=timers.filter(t=>t.ms<=2000);
+ assert.ok(early.length>=1,'an attempt within 2 seconds of opening, not only after the page goes quiet');
+ early[0].fn();await new Promise(r=>setImmediate(r));
+ assert.ok(calls.includes('ubc.sync.enabled'),'the attempt asks the background and reads the page');
+});
+test('a successful upload closes an open reminder',async()=>{
+ const state={ubcConnection:{origin:'https://mcp.kazuhahub.com',uploadToken:'t'.repeat(43)},ubcAutoSync:true,ubcSnoozeUntil:Date.now()+1e6};let listener;const removed=[];
+ const chrome={runtime:{id:'extension-id',getURL:p=>'chrome-extension://extension-id/'+p,onMessage:{addListener:fn=>listener=fn}},
+  storage:{local:{get:async()=>state,set:async x=>Object.assign(state,x),remove:async()=>{},setAccessLevel:async()=>{}}},
+  tabs:{query:async()=>[{id:5,url:REMINDER},{id:6,url:'https://example.org/'}],remove:async ids=>removed.push(...ids),onUpdated:{addListener:()=>{}}}};
+ const {snapshot,section}=await import('./fixtures.mjs');
+ const code=await build({entryPoints:['src/collector/background.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120',define:hubDefine()});
+ runInNewContext(code.outputFiles[0].text,{chrome,fetch:async()=>({ok:true,body:{cancel:async()=>{}}}),crypto:webcrypto,URL,AbortSignal,console,Date});
+ const ts=new Date().toISOString(),data=snapshot({capturedAt:ts,sections:[section({observedAt:ts})]});
+ const r=await new Promise(res=>listener({type:'ubc.sync.snapshots',snapshots:[data]},{id:'extension-id',tab:{id:1},url:'https://wd10.myworkday.com/ubc/d/task/1'},res));
+ assert.equal(r.ok,true);await new Promise(res=>setImmediate(res));
+ assert.deepEqual(removed,[5]);assert.equal(state.ubcSnoozeUntil,null);
+});

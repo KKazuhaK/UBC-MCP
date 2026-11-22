@@ -161,6 +161,10 @@ async function backgroundCheck(){
   await maybeRemind();
 }
 const reminderPage=()=>api.runtime.getURL('reminder.html');
+async function closeReminders(){
+  const tabs=(await api.tabs.query({url:reminderPage()})).filter(t=>t.id!==undefined&&t.url?.split(/[?#]/)[0]===reminderPage());
+  if(tabs.length)await api.tabs.remove(tabs.map(t=>t.id!));
+}
 /** Opens the reminder page (not Workday) when the data is older than the person's chosen age. */
 async function maybeRemind(){
   const s=await api.storage.local.get(['ubcConnection','ubcAutoSync','ubcLastSync','ubcConnectedAt','ubcRemindAfterHours','ubcSnoozeUntil']);
@@ -208,7 +212,9 @@ async function handle(message:any,sender:chrome.runtime.MessageSender){
       if(!r.ok)throw new Error(r.status===401?'Connection expired or revoked. Reconnect to MCPHub.':`Sync failed (HTTP ${r.status}).`);
       count++;
     }
-    await api.storage.local.set({ubcLastSync:{at:new Date().toISOString(),count},ubcSyncError:null});
+    await api.storage.local.set({ubcLastSync:{at:new Date().toISOString(),count},ubcSyncError:null,ubcSnoozeUntil:null});
+    // The data is fresh again: an open reminder has done its job.
+    void closeReminders().catch(()=>{});
     return {ok:true,count};
   }
   if(message.type==='ubc.sync.all'){
