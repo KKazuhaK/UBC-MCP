@@ -1,11 +1,11 @@
 import {hubOrigin,storedConnection} from './connection.js';
 import {parseSnapshot} from '../model.js';
-import {DEFAULT_HUB,HUB_PAGE_PATH,WORKDAY_ORIGIN,WORKDAY_REGISTRATIONS_URL} from './defaults.js';
+import {HUB_PAGE_PATH,WORKDAY_ORIGIN,WORKDAY_REGISTRATIONS_URL} from './defaults.js';
 import {IGNORED_SNOOZE_MS,reminderDue} from './reminder-policy.js';
 declare const browser:typeof chrome;
 const api=typeof browser!=='undefined'?browser:chrome;
 const token=(v:unknown):v is string=>typeof v==='string'&&/^[\w-]{43}$/.test(v);
-type Intent={type:'authorize'|'pair';origin:string;code?:string;at:number};
+type Intent={type:'authorize'|'pair'|'page';origin:string;code?:string;tabId?:number;at:number};
 const INTENT_TTL=5*60_000;
 type Authorization={origin:string;state:string;expires:number;tabId?:number;status:'pending'|'connected'|'error';message?:string};
 let claiming=false;
@@ -98,14 +98,33 @@ async function claimConnection(origin:string,code:string){
   // Pairing credentials never go to the webpage or to browser sync by default.
   await api.storage.local.set({ubcConnection:{origin,uploadToken:body.uploadToken},ubcConnectedAt:new Date().toISOString(),ubcSnoozeUntil:null,ubcAutoSync:true,ubcSyncError:null,ubcAuthorization:{origin,status:'connected',message:'Connected through MCPHub.'}});
   await api.storage.local.remove('ubcUploadToken');
+  await registerBridge(origin).catch(()=>{});
   void configureAlarm().catch(()=>{});
   // The first sync runs now instead of waiting for the next alarm.
   void syncAll().then(async result=>{if(result.error)await api.storage.local.set({ubcSyncError:result.error});}).catch(()=>{});
 }
-/** The default Hub's UBC page, in a top-level tab of this browser. */
-function bridgePage(sender:chrome.runtime.MessageSender){
-  if(sender.id!==api.runtime.id||!sender.tab?.id||!sender.url||(sender.frameId!==undefined&&sender.frameId!==0))return false;
-  try{const u=new URL(sender.url);return !!DEFAULT_HUB&&u.origin===DEFAULT_HUB&&u.pathname.startsWith(HUB_PAGE_PATH);}catch{return false;}
+const BRIDGE_ID='ubc-hub-bridge';
+/**
+ * The page bridge runs only on the UBC page of the Hub the person chose: the one they connected, or
+ * the one they asked to connect from the popup. No Hub is built in; the script is registered at
+ * runtime for that one origin, after the person allowed access to it.
+ */
+async function registerBridge(origin:string|null){
+  if(origin)await api.storage.local.set({ubcBridgeOrigin:origin});else await api.storage.local.remove('ubcBridgeOrigin');
+  if(!api.scripting?.registerContentScripts)return;
+  try{await api.scripting.unregisterContentScripts({ids:[BRIDGE_ID]});}catch{/* Not registered yet. */}
+  if(origin)await api.scripting.registerContentScripts([{id:BRIDGE_ID,matches:[origin+HUB_PAGE_PATH+'*'],js:['bridge.js'],runAt:'document_idle',persistAcrossSessions:true}]);
+}
+/** Registered scripts do not survive every update: put the bridge back for the saved Hub. */
+async function restoreBridge(){
+  const {ubcBridgeOrigin:origin}=await api.storage.local.get('ubcBridgeOrigin');
+  if(typeof origin==='string'&&await api.permissions.contains({origins:[origin+'/*']}))await registerBridge(origin);
+}
+/** The chosen Hub's UBC page, in a top-level tab of this browser; its origin, or null. */
+async function bridgePage(sender:chrome.runtime.MessageSender):Promise<string|null>{
+  if(sender.id!==api.runtime.id||!sender.tab?.id||!sender.url||(sender.frameId!==undefined&&sender.frameId!==0))return null;
+  const {ubcBridgeOrigin:origin}=await api.storage.local.get('ubcBridgeOrigin');
+  try{const u=new URL(sender.url);return typeof origin==='string'&&u.origin===origin&&u.pathname.startsWith(HUB_PAGE_PATH)?origin:null;}catch{return null;}
 }
 async function startAuthorization(origin:string){
   let capability:Response;
@@ -139,6 +158,12 @@ function resumeIntent(){
       origin=hubOrigin(i.origin);
       if(!await api.permissions.contains({origins:[origin+'/*']}))throw new Error('Allow access to your MCPHub to continue.');
       if(i.type==='authorize')return await startAuthorization(origin);
+      if(i.type==='page'){
+        // The person is on this Hub's UBC page: let the page talk to the extension and finish there.
+        await registerBridge(origin);
+        if(typeof i.tabId==='number')await api.scripting.executeScript({target:{tabId:i.tabId},files:['bridge.js']});
+        return {ok:true};
+      }
       if(i.type==='pair'&&token(i.code)){await claimConnection(origin,i.code);return {ok:true};}
       throw new Error('Enter the pairing code shown on the MCPHub UBC page.');
     }catch(e){
@@ -192,6 +217,8 @@ async function handle(message:any,sender:chrome.runtime.MessageSender){
   if(message.type==='ubc.sync.stop'){
     if(sender.tab||sender.id!==api.runtime.id)throw new Error('Sync request refused.');
     if(api.alarms)await api.alarms.clear(alarmName);
+    // Sent when the popup forgets the connection: the Hub page may no longer talk to the extension.
+    await registerBridge(null).catch(()=>{});
     return {ok:true};
   }
   if(message.type==='ubc.sync.configure'){
@@ -239,15 +266,19 @@ async function handle(message:any,sender:chrome.runtime.MessageSender){
     try{await claimConnection(origin,message.code);return {ok:true};}finally{claiming=false;}
   }
   if(message.type==='ubc.bridge.status'){
-    if(!bridgePage(sender))throw new Error('Request refused.');
+    const origin=await bridgePage(sender);
+    if(!origin)throw new Error('Request refused.');
     const state=await api.storage.local.get(['ubcConnection','ubcAutoSync','ubcLastSync','ubcSyncError']);
     const connection=storedConnection(state);
-    return {ok:true,connected:!!connection&&connection.origin===DEFAULT_HUB,autoSync:!!state.ubcAutoSync,lastSyncAt:(state.ubcLastSync as {at?:string}|undefined)?.at??null,syncError:state.ubcSyncError??null};
+    const connected=!!connection&&connection.origin===origin;
+    // Not connected here yet means the person chose this Hub in the popup: the page connects by itself.
+    return {ok:true,connected,pending:!connected,autoSync:!!state.ubcAutoSync,lastSyncAt:(state.ubcLastSync as {at?:string}|undefined)?.at??null,syncError:state.ubcSyncError??null};
   }
   if(message.type==='ubc.bridge.sync'){
-    if(!bridgePage(sender))throw new Error('Request refused.');
+    const origin=await bridgePage(sender);
+    if(!origin)throw new Error('Request refused.');
     const connection=storedConnection(await api.storage.local.get(['ubcConnection']));
-    if(!connection||connection.origin!==DEFAULT_HUB)throw new Error('Connect this browser first.');
+    if(!connection||connection.origin!==origin)throw new Error('Connect this browser first.');
     // The page's own request turns sync back on: it is an explicit "sync now".
     await api.storage.local.set({ubcAutoSync:true});
     const result=await syncAll();
@@ -255,12 +286,13 @@ async function handle(message:any,sender:chrome.runtime.MessageSender){
     return {ok:!!result.readable,count:result.count,error:result.error||(result.readable?'':'Could not read Workday. Sign in to Workday in this browser and try again.')};
   }
   if(message.type==='ubc.bridge.claim'){
-    if(!bridgePage(sender))throw new Error('Request refused.');
+    const origin=await bridgePage(sender);
+    if(!origin)throw new Error('Request refused.');
     if(!token(message.code))throw new Error('The page sent an invalid pairing code. Reload it and try again.');
     if(claiming)throw new Error('Connection is already in progress.');
     claiming=true;
-    try{await claimConnection(DEFAULT_HUB,message.code);return {ok:true};}
-    catch(e){await api.storage.local.set({ubcAuthorization:{origin:DEFAULT_HUB,status:'error',message:e instanceof Error?e.message:'Connection failed.'}});throw e;}
+    try{await claimConnection(origin,message.code);return {ok:true};}
+    catch(e){await api.storage.local.set({ubcAuthorization:{origin,status:'error',message:e instanceof Error?e.message:'Connection failed.'}});throw e;}
     finally{claiming=false;}
   }
   if(message.type==='ubc.authorize.claim'){
@@ -285,11 +317,10 @@ api.runtime.onMessage.addListener((message,sender,sendResponse)=>{
 });
 api.tabs.onUpdated.addListener((id,change,tab)=>{if(change.status==='complete'&&tab.url){void inject(id,tab.url).catch(()=>{});if(tab.url.startsWith(workdayOrigin))void injectWorkday(id,tab.url).catch(()=>{});}});
 api.runtime.onStartup?.addListener(()=>{void workdayTabs().then(tabs=>Promise.all(tabs.map(t=>t.id&&t.url?injectWorkday(t.id,t.url):false))).catch(()=>{});});
-api.runtime.onStartup?.addListener(()=>{void configureAlarm().catch(()=>{});void api.alarms?.create(startupAlarm,{delayInMinutes:1});});
+api.runtime.onStartup?.addListener(()=>{void configureAlarm().catch(()=>{});void restoreBridge().catch(()=>{});void api.alarms?.create(startupAlarm,{delayInMinutes:1});});
 api.runtime.onInstalled?.addListener(details=>{
   void configureAlarm().catch(()=>{});
-  // A new installation opens the Hub's UBC page, where one click connects this browser.
-  if(details?.reason==='install'&&DEFAULT_HUB)void api.tabs.create({url:DEFAULT_HUB+HUB_PAGE_PATH}).catch(()=>{});
+  void restoreBridge().catch(()=>{});
 });
 api.permissions?.onAdded?.addListener(()=>{void resumeIntent().catch(()=>{});});
 api.alarms?.onAlarm.addListener(alarm=>{

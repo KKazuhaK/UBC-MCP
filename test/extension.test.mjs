@@ -5,13 +5,26 @@ import {build} from 'esbuild';
 import {runInNewContext} from 'node:vm';
 import {parseHTML} from 'linkedom';
 import {snapshot,section} from './fixtures.mjs';
-test('popup leads with the Hub page; another Hub and a pairing code are the fallback',()=>{
- const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));
- const primary=document.querySelector('#connect-setup > .actions button');assert.equal(primary.id,'open-hub');
+test('popup offers the Hub of the open UBC page; an address or a pairing code otherwise',async()=>{
+ const html=readFileSync('extension/popup.html','utf8');
+ assert.doesNotMatch(html,/kazuhahub/);
+ const {document}=parseHTML(html);
  const manual=document.getElementById('manual-connect');assert.equal(manual.tagName,'DETAILS');
  for(const id of ['hub-origin','hub-login','pair','pair-code'])assert.ok(manual.querySelector('#'+id),id);
- // The popup never spends codes itself, so the upload credential only ever comes from the background.
  assert.doesNotMatch(readFileSync('src/collector/popup.ts','utf8'),/ubcLegacyToken|api\/claim/);
+ // Opened on a Hub's UBC page: that Hub is offered, and connecting saves a 'page' request first.
+ const state={},order=[];
+ const chrome={runtime:{sendMessage:async msg=>{order.push(msg.type);return {ok:true};}},
+  tabs:{query:async()=>[{id:9,url:'https://hub.example.edu/ubc/?connected=1'}]},
+  permissions:{request:async x=>{order.push('request:'+x.origins.join());return true;}},
+  storage:{local:{get:async()=>({...state}),set:async x=>{if(x.ubcPendingIntent)order.push('saved:'+x.ubcPendingIntent.type+':'+x.ubcPendingIntent.tabId);Object.assign(state,x);},remove:async()=>{}}}};
+ const bundle=await build({entryPoints:['src/collector/popup.ts'],bundle:true,platform:'browser',format:'iife',write:false});
+ runInNewContext(bundle.outputFiles[0].text,{document,chrome,AbortSignal,URL,Blob,console,setTimeout,clearTimeout});await new Promise(r=>setImmediate(r));
+ assert.equal(document.getElementById('page-actions').hidden,false);
+ assert.equal(document.getElementById('connect-page').textContent,'Connect to hub.example.edu');
+ await document.getElementById('connect-page').onclick();
+ assert.deepEqual(order,['saved:page:9','request:https://hub.example.edu/*','ubc.intent.resume']);
+ assert.equal(state.ubcPendingIntent.origin,'https://hub.example.edu');
 });
 test('a pairing code from the popup survives the popup closing for the access prompt',async()=>{
  const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));

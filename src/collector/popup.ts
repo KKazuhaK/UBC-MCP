@@ -3,7 +3,7 @@ import {hubOrigin,storedConnection} from './connection.js';
 import {extractWorkdayDom} from './dom.js';
 import {normalizeCapture} from './normalize.js';
 import {extractRegistrationDom,normalizeRegistrations} from './registrations.js';
-import {DEFAULT_HUB,HUB_PAGE_PATH} from './defaults.js';
+import {HUB_PAGE_PATH} from './defaults.js';
 import {remindHours} from './reminder-policy.js';
 declare const browser:typeof chrome;
 const extensionApi=typeof browser!=='undefined'?browser:chrome;
@@ -120,16 +120,30 @@ for(const [id,kind]of [['capture','sections'],['registrations','registrations']]
     feedback('Export saved. Keep registration files private. You can import this file later to preview and sync it.','success');
   });
 
-el('open-hub').onclick=()=>action('open-hub','Opening MCPHub…',async()=>{
-  if(!DEFAULT_HUB){(el('manual-connect') as HTMLDetailsElement).open=true;throw new Error('Enter your MCPHub address below.');}
-  await extensionApi.tabs.create({url:DEFAULT_HUB+HUB_PAGE_PATH});
-  feedback('Click “Connect this browser” on the MCPHub page. This popup can be closed.');
+// Opened on an MCPHub's UBC page: offer that Hub, so nothing has to be typed.
+let pageHub:{origin:string;tabId:number}|null=null;
+async function detectPageHub(){
+  try{
+    const [tab]=await extensionApi.tabs.query({active:true,currentWindow:true});
+    const u=new URL(tab?.url??'');
+    if(tab?.id===undefined||u.protocol!=='https:'||!u.pathname.startsWith(HUB_PAGE_PATH))return;
+    pageHub={origin:u.origin,tabId:tab.id};
+    el('page-actions').hidden=false;(el('manual-connect') as HTMLDetailsElement).open=false;
+    el('connect-page').textContent=`Connect to ${u.host}`;
+    el('connect-hint').textContent=`You are on the UBC page of ${u.host}. Allow access once, and the page finishes connecting.`;
+  }catch{/* Not a page the popup can read. */}
+}
+void detectPageHub();
+el('connect-page').onclick=()=>action('connect-page','Connecting…',async()=>{
+  if(!pageHub)throw new Error('Enter your MCPHub address below.');
+  await withHubAccess({type:'page',origin:pageHub.origin,tabId:pageHub.tabId});
+  feedback('Finish on the MCPHub page; it connects this browser by itself. This popup can be closed.','success');
 });
 /**
  * Asks for access to another Hub and then finishes the request. The request is saved first:
  * Chrome closes this popup while its access prompt is open, and the background then finishes it.
  */
-async function withHubAccess(intent:{type:'authorize'|'pair';origin:string;code?:string}){
+async function withHubAccess(intent:{type:'authorize'|'pair'|'page';origin:string;code?:string;tabId?:number}){
   void extensionApi.storage.local.set({ubcPendingIntent:{...intent,at:Date.now()},ubcAuthorization:null});
   // The permission request must stay the first await of the click.
   if(!await extensionApi.permissions.request({origins:[intent.origin+'/*']})){
@@ -145,7 +159,7 @@ el('hub-login').onclick=()=>action('hub-login','Opening your MCPHub…',async()=
   feedback('Continue in the MCPHub tab. This popup can be closed.');
 });
 el('pair').onclick=()=>action('pair','Connecting…',async()=>{
-  const selected=hubOrigin((el('hub-origin') as HTMLInputElement).value||DEFAULT_HUB||'');
+  const selected=hubOrigin((el('hub-origin') as HTMLInputElement).value);
   const code=(el('pair-code') as HTMLInputElement).value.trim();
   if(!/^[\w-]{43}$/.test(code))throw new Error('Enter the pairing code shown on the MCPHub UBC page.');
   await withHubAccess({type:'pair',origin:selected,code});

@@ -7,7 +7,6 @@ import {hubOrigin,storedConnection} from '../dist/collector/connection.js';
 import {readFileSync} from 'node:fs';
 import {parseHTML} from 'linkedom';
 import {snapshot,section} from './fixtures.mjs';
-import {hubDefine} from '../scripts/default-hub.mjs';
 
 async function background(){
  const state={},requests=[],tabs=[],injected=[];let listener;
@@ -18,13 +17,14 @@ async function background(){
  const send=(message,sender={id:'extension-id'})=>new Promise(resolve=>{assert.equal(listener(message,sender,resolve),true);});
  return {state,requests,tabs,injected,send};
 }
-test('the extension needs only the default Hub and UBC Workday up front; other Hubs stay optional',()=>{
+test('no MCPHub is built in: only UBC Workday up front, every Hub asked for at runtime',()=>{
  const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));
  assert.equal(document.getElementById('hub-origin').getAttribute('value'),null);
  const manifest=JSON.parse(readFileSync('extension/manifest.json','utf8'));
- assert.deepEqual(manifest.host_permissions,['https://mcp.kazuhahub.com/*','https://wd10.myworkday.com/*']);assert.deepEqual(manifest.optional_host_permissions,['https://*/*']);
- // The page bridge runs only on the default Hub's UBC page, in the top frame.
- assert.deepEqual(manifest.content_scripts,[{matches:['https://mcp.kazuhahub.com/ubc/*'],js:['bridge.js'],run_at:'document_idle'}]);
+ assert.deepEqual(manifest.host_permissions,['https://wd10.myworkday.com/*']);assert.deepEqual(manifest.optional_host_permissions,['https://*/*']);
+ // The page bridge is registered at runtime for the Hub the person chose, never declared statically.
+ assert.equal(manifest.content_scripts,undefined);
+ assert.doesNotMatch(JSON.stringify(manifest),/kazuhahub/);
 });
 test('Hub addresses are explicit HTTPS origins and a saved token stays bound to its origin',()=>{
  for(const value of ['', 'http://hub.example.com','https://a:b@hub.example.com','https://hub.example.com?token=secret','https://hub.example.com#secret','https://hub.example.com/mcp/ubc-personal?token=secret','https://hub.example.com/mcp/ubc-personal#secret'])assert.throws(()=>hubOrigin(value));
@@ -100,33 +100,39 @@ test('sync now opens a temporary Workday registration page and schedules backgro
 });
 
 async function bridgeBackground(extra={}){
- const state={},requests=[],tabs=[];let listener,onAdded,onInstalled;
+ const state={},requests=[],tabs=[],injected=[],registered=[];let listener,onAdded,onInstalled;
  const chrome={runtime:{id:'extension-id',onMessage:{addListener:fn=>listener=fn},onInstalled:{addListener:fn=>onInstalled=fn}},
   permissions:{contains:async({origins})=>origins.every(o=>(extra.granted??[]).includes(o)),onAdded:{addListener:fn=>onAdded=fn}},
   tabs:{create:async x=>{tabs.push(x);return {id:7};},get:async()=>({status:'loading'}),query:async()=>[],onUpdated:{addListener:()=>{}}},
-  scripting:{executeScript:async()=>{}},
+  scripting:{executeScript:async x=>{injected.push(x);},registerContentScripts:async x=>{registered.push(...x);},unregisterContentScripts:async({ids})=>{for(const id of ids){const i=registered.findIndex(r=>r.id===id);if(i>=0)registered.splice(i,1);}}},
   storage:{local:{get:async()=>state,set:async x=>Object.assign(state,x),remove:async keys=>{for(const k of Array.isArray(keys)?keys:[keys])delete state[k];},setAccessLevel:async()=>{}}}};
  const fetch=async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>url.endsWith('/capabilities')?{extensionAuthorization:1}:{uploadToken:'t'.repeat(43)}};};
- const code=await build({entryPoints:['src/collector/background.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120',define:hubDefine()});
+ const code=await build({entryPoints:['src/collector/background.ts'],bundle:true,platform:'browser',format:'iife',write:false,target:'chrome120'});
  runInNewContext(code.outputFiles[0].text,{chrome,fetch,crypto:webcrypto,URL,AbortSignal,console,Date,setTimeout:()=>0});
  const send=(message,sender={id:'extension-id'})=>new Promise(resolve=>{assert.equal(listener(message,sender,resolve),true);});
- return {state,requests,tabs,send,added:()=>onAdded(),installed:d=>onInstalled(d)};
+ return {state,requests,tabs,injected,registered,send,added:()=>onAdded(),installed:d=>onInstalled(d)};
 }
-test('the default Hub page connects this browser with one click; other pages and frames cannot',async()=>{
- const b=await bridgeBackground(),code='c'.repeat(43),page={id:'extension-id',tab:{id:3},frameId:0,url:'https://mcp.kazuhahub.com/ubc/?connected=1'};
- for(const sender of [{...page,url:'https://evil.example/ubc/'},{...page,url:'https://mcp.kazuhahub.com/other/'},{...page,frameId:2},{...page,id:'another-extension'},{id:'extension-id'}]){
+test('connecting from a Hub page: the popup choice registers the bridge there, and the page finishes the pairing',async()=>{
+ const hub='https://hub.example.edu',b=await bridgeBackground({granted:[hub+'/*']}),code='c'.repeat(43),page={id:'extension-id',tab:{id:3},frameId:0,url:hub+'/ubc/'};
+ // Before the person chooses this Hub, its page cannot talk to the extension.
+ assert.equal((await b.send({type:'ubc.bridge.status'},page)).ok,false);
+ b.state.ubcPendingIntent={type:'page',origin:hub,tabId:3,at:Date.now()};
+ assert.equal((await b.send({type:'ubc.intent.resume'})).ok,true);
+ assert.deepEqual(JSON.parse(JSON.stringify(b.registered)),[{id:'ubc-hub-bridge',matches:[hub+'/ubc/*'],js:['bridge.js'],runAt:'document_idle',persistAcrossSessions:true}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(b.injected)),[{target:{tabId:3},files:['bridge.js']}]);
+ const status=await b.send({type:'ubc.bridge.status'},page);
+ assert.equal(status.connected,false);assert.equal(status.pending,true);
+ for(const sender of [{...page,url:'https://evil.example/ubc/'},{...page,url:hub+'/other/'},{...page,frameId:2},{...page,id:'another-extension'},{id:'extension-id'}])
   assert.equal((await b.send({type:'ubc.bridge.claim',code},sender)).ok,false);
-  assert.equal((await b.send({type:'ubc.bridge.status'},sender)).ok,false);
- }
  assert.equal(b.requests.length,0);
- assert.equal((await b.send({type:'ubc.bridge.status'},page)).connected,false);
  assert.equal((await b.send({type:'ubc.bridge.claim',code:'short'},page)).ok,false);
  assert.equal((await b.send({type:'ubc.bridge.claim',code},page)).ok,true);
- assert.equal(b.requests[0].url,'https://mcp.kazuhahub.com/ubc/api/claim');assert.equal(b.requests[0].options.credentials,'omit');
- assert.deepEqual(JSON.parse(b.requests[0].options.body),{code});
- assert.deepEqual(JSON.parse(JSON.stringify(b.state.ubcConnection)),{origin:'https://mcp.kazuhahub.com',uploadToken:'t'.repeat(43)});
- assert.equal(b.state.ubcAutoSync,true);
- assert.equal((await b.send({type:'ubc.bridge.status'},page)).connected,true);
+ assert.equal(b.requests[0].url,hub+'/ubc/api/claim');assert.equal(b.requests[0].options.credentials,'omit');
+ assert.deepEqual(JSON.parse(JSON.stringify(b.state.ubcConnection)),{origin:hub,uploadToken:'t'.repeat(43)});
+ const after=await b.send({type:'ubc.bridge.status'},page);assert.equal(after.connected,true);assert.equal(after.pending,false);
+ // Forgetting the connection takes the bridge away again.
+ assert.equal((await b.send({type:'ubc.sync.stop'})).ok,true);
+ assert.equal(b.registered.length,0);assert.equal(b.state.ubcBridgeOrigin,undefined);
 });
 test('a popup request interrupted by the access prompt is finished once access is granted',async()=>{
  const b=await bridgeBackground({granted:['https://other-hub.example.com/*']});
@@ -144,20 +150,20 @@ test('a popup request interrupted by the access prompt is finished once access i
  assert.equal((await denied.send({type:'ubc.intent.resume'})).ok,false);assert.equal(denied.tabs.length,0);
  assert.equal((await denied.send({type:'ubc.intent.resume'},{id:'extension-id',tab:{id:1},url:'https://mcp.kazuhahub.com/ubc/'})).ok,false);
 });
-test('a new installation opens the Hub UBC page; an update does not',async()=>{
+test('installing opens no page: no Hub is built in',async()=>{
  const b=await bridgeBackground();
- b.installed({reason:'update'});b.installed({reason:'install'});await new Promise(r=>setImmediate(r));
- assert.deepEqual(JSON.parse(JSON.stringify(b.tabs)),[{url:'https://mcp.kazuhahub.com/ubc/'}]);
+ b.installed({reason:'install'});b.installed({reason:'update'});await new Promise(r=>setImmediate(r));
+ assert.deepEqual(b.tabs,[]);
 });
-test('the default Hub page can ask for a sync now; other pages cannot, and it needs a connection',async()=>{
- const b=await bridgeBackground(),page={id:'extension-id',tab:{id:3},frameId:0,url:'https://mcp.kazuhahub.com/ubc/'};
+test('the chosen Hub page can ask for a sync now; other pages cannot, and it needs a connection',async()=>{
+ const hub='https://hub.example.edu',b=await bridgeBackground(),page={id:'extension-id',tab:{id:3},frameId:0,url:hub+'/ubc/'};
+ b.state.ubcBridgeOrigin=hub;
  assert.equal((await b.send({type:'ubc.bridge.sync'},{...page,url:'https://evil.example/ubc/'})).ok,false);
  const notConnected=await b.send({type:'ubc.bridge.sync'},page);assert.equal(notConnected.ok,false);assert.match(notConnected.error,/Connect this browser/);
- b.state.ubcConnection={origin:'https://mcp.kazuhahub.com',uploadToken:'t'.repeat(43)};
+ b.state.ubcConnection={origin:hub,uploadToken:'t'.repeat(43)};
  b.state.ubcLastSync={at:'2026-11-20T00:00:00.000Z',count:1};b.state.ubcSyncError='old problem';
  const status=await b.send({type:'ubc.bridge.status'},page);
  assert.equal(status.connected,true);assert.equal(status.lastSyncAt,'2026-11-20T00:00:00.000Z');assert.equal(status.syncError,'old problem');
- // No Workday tab and no Workday access in this stand-in: the page hears why.
  const r=await b.send({type:'ubc.bridge.sync'},page);
  assert.equal(r.ok,false);assert.ok(r.error);assert.equal(b.state.ubcAutoSync,true);
 });

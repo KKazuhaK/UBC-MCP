@@ -182,7 +182,7 @@ there. Uninstalling the extension removes its local storage.
 
 | Permission | Why |
 | --- | --- |
-| Site access to `https://mcp.kazuhahub.com/*` and a script on its `/ubc/` page | upload to the default MCPHub; the script lets that page's "Connect this browser" button hand over a one-time pairing code and reads nothing else |
+| Site access to the MCPHub you connect (optional, `https://*/*` narrowed to that origin) and a script on its `/ubc/` page | upload to that MCPHub; the script lets its UBC page hand over a one-time pairing code and ask for a sync, and reads nothing else. No MCPHub is built in |
 | Site access to another MCPHub (optional, `https://*/*` narrowed to the origin you enter) | connect and upload; requested when you connect |
 | Site access to `https://wd10.myworkday.com/*` | read Workday pages for automatic sync |
 | `activeTab`, `scripting` | read the Workday tab you preview; run the sync script in Workday tabs and the approval script in the MCPHub tab |

@@ -47,16 +47,17 @@ and the Firefox summary):
 > connected to that server can then check seat counts, meeting times,
 > conflicts and your current schedule.
 >
-> - One click to connect: on the MCPHub UBC page, press "Connect this browser".
->   Another MCPHub, or a pairing code, can be entered in the popup instead; data
->   goes only to the MCPHub you connect.
+> - Connect from your MCPHub: open your MCPHub's UBC page and click the
+>   extension's icon there; after you allow access to that one site, the page
+>   finishes connecting. You can also enter the address or a pairing code in
+>   the popup. Data goes only to the MCPHub you connect.
 > - No passwords or cookies: it never reads your Workday password, cookies or
 >   session, and uploads use a credential issued when you approve the
 >   connection in MCPHub.
 > - Leaves out who you are: registration captures drop your name and student
 >   number before anything is sent.
-> - Site access is limited to UBC Workday and the default MCPHub; any other
->   MCPHub address is asked for when you connect to it.
+> - Site access is limited to UBC Workday; your MCPHub's address is asked for
+>   when you connect to it. No server address is built in.
 > - Automatic sync: the extension reads recognized Workday pages you open. It
 >   never opens Workday by itself; when your data gets old (you choose how old)
 >   it opens a reminder page instead. Sync now opens View My Courses in a
@@ -90,13 +91,12 @@ Other.
 | Permission | Justification |
 | --- | --- |
 | `activeTab` | Previews course sections or registrations from the Workday tab the user opens the popup on, when the user presses Preview. |
-| `scripting` | Runs the capture script in UBC Workday tabs to read the course sections and registrations shown there, and reads the one-time connection code from the MCPHub approval tab the user opened. |
+| `scripting` | Runs the capture script in UBC Workday tabs to read the course sections and registrations shown there; reads the one-time connection code from the MCPHub approval tab the user opened; and registers a small script on the UBC page of the MCPHub the user connected, so that page can hand over a pairing code and ask for a sync. |
 | `downloads` | Export saves the captured data as a JSON file to a place the user chooses (a Save As dialog opens). |
 | `storage` | Keeps the MCPHub address, the upload credential, whether automatic sync is on and the last sync status on this device. |
 | `alarms` | Every 15 minutes while automatic sync is on: syncs the Workday pages already open and, when the data is older than the user's chosen age, opens the extension's reminder page. |
-| Host permissions (`https://wd10.myworkday.com/*`, `https://mcp.kazuhahub.com/*`) | UBC Workday, to read the course and registration pages the extension syncs; and the default MCPHub, to upload them. |
-| Content script (`https://mcp.kazuhahub.com/ubc/*`) | A small bridge on the default MCPHub's UBC page lets its "Connect this browser" button hand the extension a one-time pairing code. It reads nothing else on the page. |
-| Host permissions (optional, `https://*/*`) | Requested at runtime only for another MCPHub address the user enters. Each self-hosted MCPHub has its own address, so it cannot be listed in advance. |
+| Host permission (`https://wd10.myworkday.com/*`) | UBC Workday, to read the course and registration pages the user opens so they can be synced. |
+| Host permissions (optional, `https://*/*`) | Requested at runtime only for the MCPHub the user connects, which uploads go to. MCPHub is self-hosted, so each user's address differs and none is built in. On that MCPHub's UBC page only, the extension registers a small script that lets the page hand over a one-time pairing code and ask for a sync; it reads nothing else on the page. |
 
 **Remote code:** No, I am not using remote code. All scripts are bundled in the package.
 
@@ -121,7 +121,7 @@ Edge takes the Chrome zip unchanged. Use the shared text above.
   same URL.
 - **Notes for certification:**
 
-> The extension needs a UBC Workday account and an MCPHub server with the UBC connector to do anything beyond its popup. To try the connection flow: installing the extension opens https://mcp.kazuhahub.com/ubc/ (the popup's Open MCPHub to connect does the same); sign in there and press "连接此浏览器" (Connect this browser). The popup's "Another MCPHub, or a pairing code" section is the manual fallback. Background checks never open Workday: they sync the Workday pages already open and, when the data is older than the chosen age (3 days by default), open the extension's reminder page. Sync now opens View My Courses in a background tab, reads it and closes it. Source: https://github.com/KKazuhaK/UBC-MCP (build: npm ci && npm run build:extension; output in extension/).
+> The extension needs a UBC Workday account and an MCPHub server with the UBC connector to do anything beyond its popup. To try the connection flow: sign in at https://mcp.kazuhahub.com/ubc/ (a hosted MCPHub; any MCPHub with the UBC connector works), click the extension's icon on that page, press Connect and allow access to that site; the page then connects the browser. The popup's "MCPHub address, or a pairing code" section is the manual fallback. Background checks never open Workday: they sync the Workday pages already open and, when the data is older than the chosen age (3 days by default), open the extension's reminder page. Sync now opens View My Courses in a background tab, reads it and closes it. Source: https://github.com/KKazuhaK/UBC-MCP (build: npm ci && npm run build:extension; output in extension/).
 
 After the product exists, Partner Center > Publish API (v1.1) gives the Client
 ID and API key for `EDGE_CLIENT_ID` and `EDGE_API_KEY`; the product id from the
