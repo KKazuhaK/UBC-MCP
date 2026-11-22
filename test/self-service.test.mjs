@@ -55,7 +55,7 @@ test('self-service forbids credentialed cross-origin claims and enables extensio
  const r=await fetch(url+'/ubc/api/claim',{method:'POST',headers,body:JSON.stringify({code})});assert.equal(r.status,403);}
  const r=await fetch(url+'/v1/snapshots',{method:'OPTIONS',headers:{Origin:extension,'Access-Control-Request-Method':'POST'}});assert.equal(r.status,204);assert.equal(r.headers.get('access-control-allow-origin'),extension);
  assert.notEqual((await fetch(url+'/v1/snapshots',{method:'OPTIONS',headers:{Origin:'https://evil.example'}})).status,204);
- const page=await fetch(url+'/ubc/');assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);assert.doesNotMatch(await page.text(),new RegExp(store.account('A').readToken));
+ const page=await fetch(url+'/ubc/');assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);const html=await page.text();assert.doesNotMatch(html,new RegExp(store.account('A').readToken));assert.ok(html.includes(`<code class="endpoint">${origin}</code>`));assert.ok(!html.includes('{{'));
 });
 test('self-service credentials survive restart encrypted; new pairing invalidates earlier codes and expiry is enforced',()=>{
  const dir=mkdtempSync(join(tmpdir(),'ubc-restart-'));let store=new Store(dir);

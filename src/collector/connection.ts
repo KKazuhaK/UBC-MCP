@@ -1,7 +1,8 @@
 export type Connection={origin:string;uploadToken:string};
 export function hubOrigin(raw:string):string {
   let u:URL;try{u=new URL(raw.trim());}catch{throw new Error('Enter your MCPHub HTTPS address.');}
-  if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash||!['','/'].includes(u.pathname))throw new Error('Use an HTTPS origin, without a path, password, query or fragment.');
+  // A pasted MCP endpoint (https://hub/mcp/<server>) is accepted: only its origin is kept.
+  if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash)throw new Error('Use an HTTPS address, without a password, query or fragment.');
   return u.origin;
 }
 export function storedConnection(data:Record<string,any>):Connection|null {
