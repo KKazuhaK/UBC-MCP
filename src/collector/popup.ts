@@ -146,7 +146,8 @@ el('connect-page').onclick=()=>action('connect-page','Connecting…',async()=>{
 async function withHubAccess(intent:{type:'authorize'|'pair'|'page';origin:string;code?:string;tabId?:number}){
   void extensionApi.storage.local.set({ubcPendingIntent:{...intent,at:Date.now()},ubcAuthorization:null});
   // The permission request must stay the first await of the click.
-  if(!await extensionApi.permissions.request({origins:[intent.origin+'/*']})){
+  // UBC Workday is asked for in the same prompt: nothing is granted at install.
+  if(!await extensionApi.permissions.request({origins:[intent.origin+'/*','https://wd10.myworkday.com/*']})){
     await extensionApi.storage.local.remove('ubcPendingIntent');
     throw new Error('Allow access to your MCPHub to continue.');
   }

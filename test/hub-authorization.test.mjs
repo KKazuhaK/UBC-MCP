@@ -17,11 +17,11 @@ async function background(){
  const send=(message,sender={id:'extension-id'})=>new Promise(resolve=>{assert.equal(listener(message,sender,resolve),true);});
  return {state,requests,tabs,injected,send};
 }
-test('no MCPHub is built in: only UBC Workday up front, every Hub asked for at runtime',()=>{
+test('nothing is granted at install: every MCPHub and UBC Workday are asked for at runtime',()=>{
  const {document}=parseHTML(readFileSync('extension/popup.html','utf8'));
  assert.equal(document.getElementById('hub-origin').getAttribute('value'),null);
  const manifest=JSON.parse(readFileSync('extension/manifest.json','utf8'));
- assert.deepEqual(manifest.host_permissions,['https://wd10.myworkday.com/*']);assert.deepEqual(manifest.optional_host_permissions,['https://*/*']);
+ assert.equal(manifest.host_permissions,undefined);assert.deepEqual(manifest.optional_host_permissions,['https://*/*']);
  // The page bridge is registered at runtime for the Hub the person chose, never declared statically.
  assert.equal(manifest.content_scripts,undefined);
  assert.doesNotMatch(JSON.stringify(manifest),/kazuhahub/);

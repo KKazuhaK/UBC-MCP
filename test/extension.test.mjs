@@ -23,7 +23,7 @@ test('popup offers the Hub of the open UBC page; an address or a pairing code ot
  assert.equal(document.getElementById('page-actions').hidden,false);
  assert.equal(document.getElementById('connect-page').textContent,'Connect to hub.example.edu');
  await document.getElementById('connect-page').onclick();
- assert.deepEqual(order,['saved:page:9','request:https://hub.example.edu/*','ubc.intent.resume']);
+ assert.deepEqual(order,['saved:page:9','request:https://hub.example.edu/*,https://wd10.myworkday.com/*','ubc.intent.resume']);
  assert.equal(state.ubcPendingIntent.origin,'https://hub.example.edu');
 });
 test('a pairing code from the popup survives the popup closing for the access prompt',async()=>{
@@ -37,7 +37,7 @@ test('a pairing code from the popup survives the popup closing for the access pr
  document.getElementById('hub-origin').value='https://other-hub.example.com/mcp/ubc-personal';
  document.getElementById('pair-code').value='c'.repeat(43);
  await document.getElementById('pair').onclick();
- assert.deepEqual(order,['saved:pair','request:https://other-hub.example.com/*','ubc.intent.resume']);
+ assert.deepEqual(order,['saved:pair','request:https://other-hub.example.com/*,https://wd10.myworkday.com/*','ubc.intent.resume']);
  assert.equal(state.ubcPendingIntent.origin,'https://other-hub.example.com');assert.equal(state.ubcPendingIntent.code,'c'.repeat(43));
  assert.equal(document.getElementById('pair-code').value,'');
 });

@@ -56,8 +56,8 @@ and the Firefox summary):
 >   connection in MCPHub.
 > - Leaves out who you are: registration captures drop your name and student
 >   number before anything is sent.
-> - Site access is limited to UBC Workday; your MCPHub's address is asked for
->   when you connect to it. No server address is built in.
+> - No site access at install: UBC Workday and your MCPHub are asked for when
+>   you connect. No server address is built in.
 > - Automatic sync: the extension reads recognized Workday pages you open. It
 >   never opens Workday by itself; when your data gets old (you choose how old)
 >   it opens a reminder page instead. Sync now opens View My Courses in a
@@ -95,8 +95,7 @@ Other.
 | `downloads` | Export saves the captured data as a JSON file to a place the user chooses (a Save As dialog opens). |
 | `storage` | Keeps the MCPHub address, the upload credential, whether automatic sync is on and the last sync status on this device. |
 | `alarms` | Every 15 minutes while automatic sync is on: syncs the Workday pages already open and, when the data is older than the user's chosen age, opens the extension's reminder page. |
-| Host permission (`https://wd10.myworkday.com/*`) | UBC Workday, to read the course and registration pages the user opens so they can be synced. |
-| Host permissions (optional, `https://*/*`) | Requested at runtime only for the MCPHub the user connects, which uploads go to. MCPHub is self-hosted, so each user's address differs and none is built in. On that MCPHub's UBC page only, the extension registers a small script that lets the page hand over a one-time pairing code and ask for a sync; it reads nothing else on the page. |
+| Host permissions (optional, `https://*/*`) | Requested at runtime, when the user connects, for exactly two origins: UBC Workday (`https://wd10.myworkday.com/*`), to read the course and registration pages the user opens so they can be synced; and the MCPHub the user connects, which uploads go to. MCPHub is self-hosted, so each user's address differs and none is built in. On that MCPHub's UBC page only, the extension registers a small script that lets the page hand over a one-time pairing code and ask for a sync; it reads nothing else on the page. |
 
 **Remote code:** No, I am not using remote code. All scripts are bundled in the package.
 
