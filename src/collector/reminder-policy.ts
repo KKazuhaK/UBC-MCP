@@ -1,3 +1,4 @@
+import {t} from './i18n.js';
 /** How old the data may get before the extension opens a reminder, in hours; 0 turns reminders off. */
 export const REMIND_CHOICES=[24,72,168,0] as const;
 export const DEFAULT_REMIND_HOURS=72;
@@ -20,9 +21,9 @@ export function reminderDue(s:{lastSyncAt?:string|null;connectedAt?:string|null;
 }
 export function ago(iso:string|null|undefined,now:number):string{
   const ms=now-Date.parse(iso??'');
-  if(!Number.isFinite(ms))return 'never';
+  if(!Number.isFinite(ms))return t('never');
   const h=Math.floor(ms/HOUR);
-  if(h<1)return 'less than an hour ago';
-  if(h<48)return `${h} hour${h===1?'':'s'} ago`;
-  const d=Math.floor(h/24);return `${d} days ago`;
+  if(h<1)return t('less than an hour ago');
+  if(h<48)return h===1?t('1 hour ago'):t('{n} hours ago',{n:h});
+  return t('{n} days ago',{n:Math.floor(h/24)});
 }

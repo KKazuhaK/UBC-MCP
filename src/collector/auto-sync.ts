@@ -2,6 +2,7 @@ import {extractWorkdayDom} from './dom.js';
 import {normalizeCapture} from './normalize.js';
 import {extractRegistrationDom,normalizeRegistrations} from './registrations.js';
 import type {Snapshot} from '../model.js';
+import {t} from './i18n.js';
 declare const browser:typeof chrome;
 const api=typeof browser!=='undefined'?browser:chrome;
 const marker='__ubcCourseCaptureAutoSync';
@@ -11,11 +12,11 @@ if(!root[marker]){
   root[marker]=true;
   let timer:ReturnType<typeof setTimeout>|undefined,last='',lastAt=0,running=false;
   async function run(force=false){
-    if(running)return {ok:false,error:'A sync is already running.'};
+    if(running)return {ok:false,error:t('A sync is already running.')};
     running=true;
     try{
       const access=await api.runtime.sendMessage({type:'ubc.sync.enabled'});
-      if(!access?.ok||!access.enabled)return {ok:false,error:'Automatic sync is disabled.'};
+      if(!access?.ok||!access.enabled)return {ok:false,error:t('Automatic sync is disabled.')};
       const snapshots:Snapshot[]=[];
       const courses=extractWorkdayDom();
       if(courses.cards.length||courses.details){
@@ -39,16 +40,17 @@ if(!root[marker]){
         const candidates=[nearLabels,...texts.map(text=>[...text.matchAll(/My (?:Enrolled|Waitlisted) Courses\s*(\d+)\s*items?\b/gi)].map(m=>Number(m[1])))];
         const counts=candidates.find(values=>values.length&&values.reduce((a,b)=>a+b,0)===registrations.rows.length)??candidates.find(values=>values.length)??[];
         if(counts.length&&counts.reduce((a,b)=>a+b,0)===registrations.rows.length){
-          try{snapshots.push(...normalizeRegistrations(registrations));}catch{registrationIssue='Could not recognize the registration periods on this page.';}
-        }else registrationIssue=`Registration table may be incomplete (${registrations.rows.length} rows; ${counts.length?counts.reduce((a,b)=>a+b,0):'unknown'} expected).`;
+          try{snapshots.push(...normalizeRegistrations(registrations));}catch{registrationIssue=t('Could not recognize the registration periods on this page.');}
+        }else registrationIssue=t('Registration table may be incomplete ({rows} rows; {expected} expected).',{rows:registrations.rows.length,expected:counts.length?counts.reduce((a,b)=>a+b,0):'?'});
       }
-      if(!snapshots.length)return {ok:false,error:registrationIssue||'No complete supported Workday data is visible on this page.'};
+      // `code` lets the background tell "nothing to read here" apart from a real problem in any language.
+      if(!snapshots.length)return registrationIssue?{ok:false,error:registrationIssue}:{ok:false,code:'no_data',error:t('No complete supported Workday data is visible on this page.')};
       const signature=JSON.stringify(snapshots,(key,value)=>key==='capturedAt'||key==='observedAt'?undefined:value);
       if(!force&&signature===last&&Date.now()-lastAt<240_000)return {ok:true,unchanged:true,count:0};
       const result=await api.runtime.sendMessage({type:'ubc.sync.snapshots',snapshots});
-      if(!result?.ok)return {ok:false,error:result?.error??'Sync failed.'};
+      if(!result?.ok)return {ok:false,error:result?.error??t('Sync failed.')};
       last=signature;lastAt=Date.now();return {ok:true,count:result.count,kinds:[...new Set(snapshots.map(s=>s.kind))]};
-    }catch{return {ok:false,error:'Could not read or sync this Workday page.'};}
+    }catch{return {ok:false,error:t('Could not read or sync this Workday page.')};}
     finally{running=false;}
   }
   // After the page settles: Workday keeps re-rendering, so this alone could wait for minutes.
