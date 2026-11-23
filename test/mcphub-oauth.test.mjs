@@ -331,7 +331,8 @@ test('page script: connect navigates to the OAuth start, mutating calls send the
   const fetch=async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.endsWith('/status')?{authenticated,username:'alice',csrf:'c'.repeat(43),scopes:[]}:url.endsWith('/pair')?{code:'x'.repeat(43),expires:Date.now()+1000}:{authorizeUrl:'https://hub.example.test/oauth/authorize?x=1'}};};
   runInNewContext(script,{document,fetch,AbortSignal,URLSearchParams,location:{hash:'',search:'',assign:u=>assigned.push(u)},confirm:()=>true,alert:()=>{}});
   await new Promise(r=>setImmediate(r));
-  assert.match(document.getElementById('status').textContent,/已连接/);
+  // English by default; the page has no navigator here.
+  assert.match(document.getElementById('status').textContent,/account connected/);
   for(const id of ['pair','pairing','code','copy','manual'])assert.equal(document.getElementById(id),null,id);
   await document.getElementById('disconnect').onclick();
   assert.deepEqual(assigned,['https://hub.example.test/oauth/authorize?x=1']);assert.equal(JSON.parse(calls.find(c=>c.url==='/ubc/oauth/start').options.body).intent,'disconnect');
@@ -379,4 +380,26 @@ test('the cookie adapter still works and is marked deprecated in its startup log
   const w=[],a=adapterFromEnv(store,{UBC_PLATFORM_ADAPTER:'mcphub',UBC_PUBLIC_ORIGIN:'https://hub.example.test'},m=>w.push(m));
   assert.equal(a.name,'mcphub');assert.equal(w.length,1);assert.match(w[0],/DEPRECATED.*session cookie.*mcphub-oauth/);
   const auto=[];adapterFromEnv(store,{UBC_PUBLIC_ORIGIN:'https://hub.example.test'},m=>auto.push(m));assert.equal(auto.length,1);assert.match(auto[0],/mcphub-oauth/);
+});
+
+test('page language: English by default, the Chinese text for a Chinese browser',async()=>{
+  const {parseHTML}=await import('linkedom'),{runInNewContext}=await import('node:vm'),{page,script}=await import('../dist/connector/adapters/mcphub-oauth-web.js');
+  const run=async language=>{
+    const {document}=parseHTML(page);
+    const fetch=async url=>({ok:true,json:async()=>url.endsWith('/status')?{authenticated:false,scopes:[]}:{}});
+    runInNewContext(script,{document,fetch,AbortSignal,URLSearchParams,navigator:{language},location:{hash:'',search:'',assign:()=>{}},confirm:()=>true,alert:()=>{}});
+    await new Promise(r=>setImmediate(r));
+    return document;
+  };
+  const en=await run('en-US');
+  assert.equal(en.documentElement.getAttribute('lang'),'en');
+  assert.match(en.querySelector('h1').textContent,/Connect your UBC course data/);
+  assert.match(en.getElementById('status').textContent,/Not connected yet/);
+  const zh=await run('zh-CN');
+  assert.equal(zh.documentElement.getAttribute('lang'),'zh-CN');
+  assert.match(zh.querySelector('h1').textContent,/[\u4e00-\u9fff]/);
+  assert.match(zh.getElementById('status').textContent,/[\u4e00-\u9fff]/);
+  assert.match(zh.querySelector('title').textContent,/[\u4e00-\u9fff]/);
+  // Every Chinese text in the markup has an English default beside it.
+  assert.doesNotMatch(page.replace(/data-zh(-label)?="[^"]*"/g,''),/[\u4e00-\u9fff]/);
 });

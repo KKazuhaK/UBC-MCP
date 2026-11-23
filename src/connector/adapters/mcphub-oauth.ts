@@ -157,8 +157,9 @@ export function mcphubOAuthAdapter(store:Store,config:McphubOAuthConfig):Platfor
   }
 
   // ---- HTTP -----------------------------------------------------------------
-  const SCOPE_TEXT='仅允许写入你自己的 {{SERVER_NAME}} 凭证；访问令牌用完即丢弃，不会保存。';
-  const page$=()=>(signInOnly?page.replace(SCOPE_TEXT,'仅用于确认你的 MCPHub 身份，不会写入任何凭证；访问令牌用完即丢弃，不会保存。'):page).replaceAll('{{PLATFORM_ORIGIN}}',origin).replaceAll('{{SERVER_NAME}}',serverName);
+  // The scope sentence, in both languages (see the page's data-zh texts).
+  const SCOPE_TEXT='<span data-zh="仅允许写入你自己的 {{SERVER_NAME}} 凭证；访问令牌用完即丢弃，不会保存。">Can write only your own {{SERVER_NAME}} credential; the access token is discarded after use and never stored.</span>';
+  const page$=()=>(signInOnly?page.replace(SCOPE_TEXT,'<span data-zh="仅用于确认你的 MCPHub 身份，不会写入任何凭证；访问令牌用完即丢弃，不会保存。">Used only to confirm your MCPHub identity; no credential is written. The access token is discarded after use and never stored.</span>'):page).replaceAll('{{PLATFORM_ORIGIN}}',origin).replaceAll('{{SERVER_NAME}}',serverName);
   function html(res:ServerResponse,status:number,body:string,cookies:string[]=[]) {
     res.writeHead(status,{'Content-Type':'text/html; charset=utf-8',...PAGE_HEADERS,...(cookies.length?{'Set-Cookie':cookies}:{})});res.end(body);
   }
