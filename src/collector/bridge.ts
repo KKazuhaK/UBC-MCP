@@ -3,6 +3,7 @@
 // pairing code.
 // It reads nothing else on the page and never sees cookies or Hub tokens.
 import {BRIDGE_CHANNEL} from './defaults.js';
+import {t} from './i18n.js';
 declare const browser:typeof chrome;
 (()=>{
   const api=typeof browser!=='undefined'?browser:chrome;
@@ -26,16 +27,16 @@ declare const browser:typeof chrome;
       if(syncing)return;
       syncing=true;
       void api.runtime.sendMessage({type:'ubc.bridge.sync'})
-        .then(r=>post({type:'synced',ok:!!r?.ok,count:r?.count??0,error:r?.ok?'':r?.error??'Sync failed.'}),
-          ()=>post({type:'synced',ok:false,count:0,error:'Could not reach the extension. Reload this page and try again.'}))
+        .then(r=>post({type:'synced',ok:!!r?.ok,count:r?.count??0,error:r?.ok?'':r?.error??t('Sync failed.')}),
+          ()=>post({type:'synced',ok:false,count:0,error:t('Could not reach the extension. Reload this page and try again.')}))
         .finally(()=>{syncing=false;void announce();});
       return;
     }
     if(data.type!=='connect'||typeof data.code!=='string'||claiming)return;
     claiming=true;
     void api.runtime.sendMessage({type:'ubc.bridge.claim',code:data.code})
-      .then(result=>post({type:'result',ok:!!result?.ok,error:result?.ok?'':result?.error??'Connection failed.'}),
-        ()=>post({type:'result',ok:false,error:'Could not reach the extension. Reload this page and try again.'}))
+      .then(result=>post({type:'result',ok:!!result?.ok,error:result?.ok?'':result?.error??t('Connection failed.')}),
+        ()=>post({type:'result',ok:false,error:t('Could not reach the extension. Reload this page and try again.')}))
       .finally(()=>{claiming=false;void announce();});
   });
   void announce();

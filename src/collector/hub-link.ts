@@ -1,3 +1,4 @@
+import {t} from './i18n.js';
 // Runs only in the tab opened by this extension for a pending Hub authorization.
 // No cookies, profile fields or Hub tokens are read.
 declare const browser:typeof chrome;
@@ -16,7 +17,7 @@ declare const browser:typeof chrome;
     try{
       const result=await api.runtime.sendMessage({type:'ubc.authorize.claim',state,code:payload.code});
       output.textContent='';output.dataset.result=result?.ok?'connected':'error';output.dataset.message=result?.error??'';
-    }catch{output.textContent='';output.dataset.result='error';output.dataset.message='Could not reach the extension. Start again from its popup.';}
+    }catch{output.textContent='';output.dataset.result='error';output.dataset.message=t('Could not reach the extension. Start again from its popup.');}
   };
   const observer=new MutationObserver(()=>{void read();});observer.observe(document.documentElement,{subtree:true,childList:true,characterData:true});void read();
   setTimeout(()=>observer.disconnect(),10*60_000);
