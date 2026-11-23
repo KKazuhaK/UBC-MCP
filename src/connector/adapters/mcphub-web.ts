@@ -14,7 +14,10 @@ ${companionStep}
 <aside class="card"><p class="aside-title">关于这条连接</p><div class="info-row"><strong>密码留在浏览器</strong><p>无需向服务器提供 Workday 密码或 Cookie。注册记录不包含你的姓名和学号。</p></div><div class="info-row"><strong>自动同步与手动刷新</strong><p>新版扩展可自动同步注册信息，也可暂停或手动刷新。服务器保存的是最近一次同步的快照。</p></div><div class="info-row"><strong>连接到 MCP 客户端</strong><p>在支持远程 MCP 的客户端中添加：</p><code class="endpoint">{{PLATFORM_ORIGIN}}/mcp/{{SERVER_NAME}}</code></div><details><summary>连接管理</summary><p>断开会撤销所有读写凭证，并删除当前快照。历史备份按服务器保留策略处理。</p><button id="disconnect" class="danger">断开并删除我的数据</button></details></aside></main>
 <footer><span>此项目为独立项目，与 UBC 或 Workday 无隶属关系。</span><span>快照查询 · 不会自动选课</span></footer></div>
 <script src="/ubc/app.js" defer></script></html>`;
-export const script=String.raw`const $=id=>document.getElementById(id);let busy=false,connected=false;
+export const script=String.raw`// This deprecated page stays Chinese, including the shared extension step.
+const L=(en,zh)=>zh;
+if(typeof document!=='undefined'){document.querySelectorAll('[data-zh]').forEach(e=>{e.textContent=e.getAttribute('data-zh');});document.querySelectorAll('[data-zh-label]').forEach(e=>{e.setAttribute('aria-label',e.getAttribute('data-zh-label'));});}
+const $=id=>document.getElementById(id);let busy=false,connected=false;
 const extensionState=/^#extension-auth=([a-f0-9]{64})$/.exec(typeof location==='undefined'?'':location.hash)?.[1];
 const labels={'companion-sync':'正在同步…','companion-connect':'正在连接此浏览器…','show-code':'正在生成配对码…','extension-authorize':'正在连接扩展…',connect:'正在连接 UBC…',refresh:'正在检查连接…',disconnect:'正在撤销连接并删除数据…'};
 function feedback(text,state='info'){$('status').textContent=text;$('status').dataset.state=state;}
