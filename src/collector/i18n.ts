@@ -22,15 +22,13 @@ export function t(text:string,vars?:Record<string,string|number>):string {
   return vars?s.replace(/\{(\w+)\}/g,(m,k:string)=>k in vars?String(vars[k]):m):s;
 }
 /**
- * Translates a page: `data-i18n` elements get their own English text translated, `data-i18n-html`
- * ones get markup from the (constant) translation table, and `data-i18n-placeholder` and
- * `data-i18n-label` translate those attributes.
+ * Translates a page: `data-i18n` elements get their own English text translated, and
+ * `data-i18n-placeholder` and `data-i18n-label` translate those attributes. Text only, never markup.
  */
 export function localizeDocument(doc:Document):void {
   doc.documentElement.setAttribute('lang',currentLang()==='zh'?'zh-CN':'en');
   if(currentLang()==='en')return;
   doc.querySelectorAll<HTMLElement>('[data-i18n]').forEach(el=>{el.textContent=t((el.textContent??'').trim());});
-  doc.querySelectorAll<HTMLElement>('[data-i18n-html]').forEach(el=>{el.innerHTML=t(el.innerHTML.trim());});
   doc.querySelectorAll<HTMLElement>('[data-i18n-placeholder]').forEach(el=>{const v=el.getAttribute('placeholder');if(v)el.setAttribute('placeholder',t(v));});
   doc.querySelectorAll<HTMLElement>('[data-i18n-label]').forEach(el=>{const v=el.getAttribute('aria-label');if(v)el.setAttribute('aria-label',t(v));});
   const title=doc.querySelector('title');if(title?.textContent)title.textContent=t(title.textContent.trim());
