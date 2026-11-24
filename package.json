@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "npm run build && node --test test/*.test.mjs",
+    "test": "npm run build && node --max-old-space-size=384 --test --test-concurrency=4 test/*.test.mjs",
     "test:live": "npm run build && node scripts/live-check.mjs",
     "start": "node dist/cli.js",
     "connector": "node dist/connector/cli.js serve",
