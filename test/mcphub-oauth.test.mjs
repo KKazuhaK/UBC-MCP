@@ -333,7 +333,7 @@ test('page script: connect navigates to the OAuth start, mutating calls send the
   await new Promise(r=>setImmediate(r));
   // English by default; the page has no navigator here.
   assert.match(document.getElementById('status').textContent,/account connected/);
-  for(const id of ['pair','pairing','code','copy','manual'])assert.equal(document.getElementById(id),null,id);
+  for(const id of ['pair','pairing','code','copy','manual'])assert.ok(!document.getElementById(id),'#'+id+' should not be on the page');
   await document.getElementById('disconnect').onclick();
   assert.deepEqual(assigned,['https://hub.example.test/oauth/authorize?x=1']);assert.equal(JSON.parse(calls.find(c=>c.url==='/ubc/oauth/start').options.body).intent,'disconnect');
   document.getElementById('connect').onclick();assert.equal(assigned.at(-1),'/ubc/oauth/start');

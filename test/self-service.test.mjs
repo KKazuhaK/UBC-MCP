@@ -74,7 +74,7 @@ test('connection GUI connects, has no manual pairing, cancels deletion and shows
  await new Promise(r=>setImmediate(r));
  await document.getElementById('connect').onclick();assert.equal(connected,true);
  assert.match(document.getElementById('status').textContent,/已连接/);
- for(const id of ['pair','pairing','code','copy','manual'])assert.equal(document.getElementById(id),null,id);
+ for(const id of ['pair','pairing','code','copy','manual'])assert.ok(!document.getElementById(id),'#'+id+' should not be on the page');
  await document.getElementById('disconnect').onclick();assert.equal(connected,true);
  allowDelete=true;await document.getElementById('disconnect').onclick();assert.equal(connected,false);
  fail=true;await document.getElementById('refresh').onclick();assert.equal(document.getElementById('status').textContent,'Sign in to Hub');
